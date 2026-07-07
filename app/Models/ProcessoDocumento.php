@@ -1,0 +1,73 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
+
+class ProcessoDocumento extends Model
+{
+    const STATUS_BAIXADO = 'baixado';
+    const STATUS_PENDENTE = 'pendente';
+    const STATUS_ERRO = 'erro';
+
+    protected $table = 'processo_documentos';
+    protected $fillable = [
+        'processo_id',
+        'id_documento',
+        'id_documento_vinculado',
+        'tipo_documento',
+        'data_hora',
+        'mimetype',
+        'movimento',
+        'hash',
+        'descricao',
+        'usuario_juntada_arquivo',
+        'data_juntada',
+        'status',
+        'url',
+        'path',
+        'file_size',
+        'tentativas_download',
+        'erro_mni',
+        'ocr_processado',
+        'ocr_enviado_fila',
+        'ocr_concluido_data',
+        'ocr_job_id'
+    ];
+
+    protected $casts = [
+        'id_documento' => 'integer',
+        'ocr_concluido_data' => 'datetime',
+    ];
+
+    protected $hidden = [
+        'id',
+        'processo_id',
+        'processo_id',
+        'created_at',
+        'updated_at',
+        'deleted_at',
+        'baixado',
+        'url',
+        'path',
+    ];
+
+
+    public function processo()
+    {
+        return $this->belongsTo(Processo::class, 'processo_id');
+    }
+
+    public function getTipoDocumento()
+    {
+        return TipoDocumento::where('codigo', $this->tipo_documento)
+            ->where('tribunal_id', $this->processo->tribunal_id)
+            ->first();
+    }
+
+    public function getUrlAttribute($value)
+    {
+        return Storage::url($this->path);
+    }
+}

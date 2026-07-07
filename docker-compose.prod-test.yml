@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+    app:
+        image: sim-mni:prod-local
+        container_name: sim-mni-prod-test
+        ports:
+            - "8010:80"
+        env_file:
+            - .env.production
+        networks:
+            - desenvolvimento
+        restart: unless-stopped
+
+networks:
+    desenvolvimento:
+        external: true

@@ -1,0 +1,11 @@
+apps:
+    - name: schedule-run
+      script: artisan
+      exec_mode: fork
+      interpreter: php
+      instances: 1
+      cron_restart: "* * * * *"
+      watch: true
+      autorestart: false
+      args:
+          - schedule:run

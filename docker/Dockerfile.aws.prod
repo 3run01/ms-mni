@@ -1,0 +1,75 @@
+FROM dunglas/frankenphp:php8.3-bookworm
+
+ARG APP_DIR=/var/www/app
+
+# Instala dependências do sistema
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    git \
+    unzip \
+    librabbitmq-dev \
+    libpq-dev \
+    supervisor \
+    libpng-dev \
+    libxml2-dev \
+    zlib1g-dev \
+    libzip-dev \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instala extensões PHP via install-php-extensions (mais confiável)
+RUN install-php-extensions \
+    gd \
+    pcntl \
+    opcache \
+    pdo \
+    pdo_mysql \
+    pdo_pgsql \
+    pgsql \
+    redis \
+    mysqli \
+    session \
+    xml \
+    zip \
+    iconv \
+    simplexml \
+    fileinfo \
+    soap
+
+# Copia o Composer da imagem oficial
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Define o diretório de trabalho
+WORKDIR $APP_DIR
+
+# Copia apenas arquivos de dependências primeiro para maximizar cache
+COPY --chown=www-data:www-data composer.json composer.lock ./
+RUN composer install --no-dev --no-interaction --no-scripts --prefer-dist
+
+# Agora copia o restante do código da aplicação
+COPY --chown=www-data:www-data . .
+
+# Gera autoload otimizado
+RUN composer dump-autoload --optimize --no-dev --no-scripts
+
+# Copia configurações customizadas (caso não estejam na base)
+COPY ./docker/supervisord/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY ./docker/supervisord/conf /etc/supervisord.d/
+COPY ./docker/php/extra-php.ini /usr/local/etc/php/conf.d/extra-php.ini
+COPY ./docker/php/extra-php-fpm.conf /etc/php8/php-fpm.d/www.conf
+COPY ./docker/nginx/sites.conf /etc/nginx/sites-enabled/default.conf
+COPY ./docker/nginx/error.html /var/www/html/error.html
+COPY ./docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Build frontend
+RUN npm install && npm run build
+
+# Permissões (ajuste se necessário)
+RUN chown -R www-data:www-data $APP_DIR
+
+# ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

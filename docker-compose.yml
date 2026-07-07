@@ -1,0 +1,46 @@
+services:
+    php:
+        container_name: ${CONTAINER_NAME:-ms_mni}
+        # container_name: ms-mni
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+        environment:
+            SERVER_NAME: ":8080"
+        ports:
+            # - 8006:80
+            - ${CONTAINER_PORT:-8001}:80
+        depends_on:
+            redis:
+                condition: service_healthy
+        volumes:
+            - .:/var/www/app
+            - ./docker/php/extra-php.ini:/usr/local/etc/php/conf.d/extra-php.ini
+            - ./docker/supervisord/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
+            - ./docker/supervisord/conf:/etc/supervisord.d/
+        networks:
+            - desenvolvimento
+
+    redis:
+        image: redis:7.4.0
+        container_name: redis
+        restart: always
+        ports:
+            - "6379:6379"
+        volumes:
+            - redis-data:/data
+        networks:
+            - desenvolvimento
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 5s
+            timeout: 3s
+            retries: 5
+            start_period: 10s
+
+volumes:
+    redis-data:
+
+networks:
+    desenvolvimento:
+        external: true

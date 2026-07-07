@@ -1,0 +1,20 @@
+{
+    "ecr": {
+      "repository": "vendor/sim-mni",
+      "region": "sa-east-1"
+    },
+    "ecs": {
+      "cluster": "SIM-Cluster",
+      "service": "sim-mni",
+      "taskDefinition": "sim-mni-task-definition",
+      "containerName": "sim-mni"
+    },
+    "docker": {
+      "buildContext": ".",
+      "dockerfile": "docker/prod/8.4/Dockerfile"
+    },
+    "versioning": {
+      "autoIncrement": true,
+      "defaultVersion": "v0.0.1"
+    }
+  }

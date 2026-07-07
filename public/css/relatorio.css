@@ -1,0 +1,23 @@
+body {
+    font-size: 15px;
+    margin-left: 20px;
+    margin-right: 20px;
+    margin-bottom: 20px;
+}
+*{
+    margin-left: 0;
+    margin-right: 0;
+    font-family: "Helvetica Neue",Helvetica,Arial
+}
+.table{
+    width: 100%;
+    margin-left: 10px;
+    margin-right: 10px;
+    border-bottom: 1px;
+}
+thead{
+    background-color: #DCD8D8;
+}
+th, td {
+    border-bottom: 1px solid #ddd;
+}

@@ -1,0 +1,117 @@
+<context>
+# Overview
+O SIM-MNI é um sistema de integração e monitoramento de processos judiciais que permite consultar, baixar e gerenciar informações de processos através de diferentes tribunais. O sistema resolve o problema de fragmentação de informações judiciais, oferecendo uma interface unificada para consulta e monitoramento de processos em múltiplos tribunais.
+
+# Core Features
+- **Consulta de Processos**: Permite buscar processos por número ou nome das partes em diferentes tribunais
+- **Integração com PJe**: Comunicação com o sistema PJe (Processo Judicial Eletrônico) para consulta de dados
+- **Download de Documentos**: Baixa automaticamente documentos e movimentações dos processos
+- **Monitoramento de Movimentações**: Acompanha mudanças e atualizações nos processos
+- **API RESTful**: Interface de programação para integração com outros sistemas
+- **Geração de Relatórios**: Cria relatórios em PDF dos dados dos processos
+- **Sistema de Jobs**: Processamento assíncrono para operações pesadas como download de documentos
+
+# User Experience
+- **Usuários do Sistema**: Advogados, servidores públicos, analistas jurídicos
+- **Fluxo Principal**: Login → Seleção de Tribunal → Consulta de Processo → Visualização de Dados → Download de Documentos
+- **Interface**: API REST com possibilidade de interface web para consultas
+- **Experiência Mobile**: API permite integração com aplicações mobile
+</context>
+
+<PRD>
+# Technical Architecture
+- **Framework**: Laravel 11 com PHP 8.2+
+- **Banco de Dados**: MySQL/PostgreSQL para armazenamento de processos e movimentações
+- **Queue System**: Laravel Queue para processamento assíncrono de downloads
+- **PDF Generation**: DomPDF, Snappy e TCPDF para geração de relatórios
+- **Storage**: AWS S3 para armazenamento de documentos
+- **Monitoring**: Sentry para monitoramento de erros
+- **Containerização**: Docker com Traefik para proxy reverso e HTTPS
+- **Web Server**: FrankenPHP (Laravel Octane) para alta performance
+
+# Development Roadmap
+## Fase 1 - MVP (Funcionalidades Básicas)
+- Sistema de autenticação e autorização
+- Consulta básica de processos por número
+- Integração com PJe para consulta de dados
+- Armazenamento básico de dados de processos
+- API REST para consultas
+
+## Fase 2 - Funcionalidades Avançadas
+- Download automático de documentos
+- Sistema de jobs para processamento assíncrono
+- Monitoramento de movimentações
+- Geração de relatórios em PDF
+- Interface web para consultas
+
+## Fase 3 - Melhorias de Interface e Monitoramento
+- **Melhoria 1**: Implementar tela de login para interface web
+- **Melhoria 2**: Instalar e configurar Laravel Pulse para monitoramento em tempo real
+  - Configurar tabelas do Pulse no schema 'pulse' do banco atual
+  - Configurar variáveis de ambiente específicas para o schema
+- **Melhoria 3**: Instalar e configurar Opcodes Log Viewer para visualização de logs
+- **Melhoria 4**: Implementar middleware de autenticação nas rotas do Pulse e Log Viewer
+  - Proteger rotas administrativas com autenticação obrigatória
+  - Garantir acesso restrito a ferramentas de monitoramento
+
+## Fase 4 - Otimizações e Escalabilidade
+- Cache de consultas frequentes
+- Otimização de performance
+- Sistema de notificações
+- Dashboard de monitoramento
+- Integração com outros tribunais
+
+# Logical Dependency Chain
+1. **Fundação**: Sistema de autenticação e modelos básicos (Processo, Tribunal, User)
+2. **Integração**: Serviços de comunicação com PJe e outros tribunais
+3. **API**: Controllers e Resources para exposição de dados
+4. **Processamento**: Jobs para download e processamento de documentos
+5. **Interface**: Views e componentes para interface web
+6. **Melhorias de Interface**: Tela de login e autenticação web
+7. **Monitoramento**: Laravel Pulse e Log Viewer com autenticação
+8. **Otimização**: Cache, monitoramento e performance
+
+# Risks and Mitigations
+- **Dependência de APIs Externas**: Implementar fallbacks e retry mechanisms
+- **Volume de Dados**: Estratégias de paginação e cache
+- **Performance**: Uso de queues e processamento assíncrono
+- **Segurança**: Validação rigorosa de inputs e sanitização de dados
+- **Disponibilidade**: Monitoramento proativo e alertas
+
+# Appendix
+- **Tribunais Suportados**: PJe e outros sistemas judiciais
+- **Formatos de Documento**: PDF, HTML, XML
+- **Limites de API**: Rate limiting e quotas
+- **Backup**: Estratégias de backup e recuperação de dados
+
+## Melhorias Específicas Detalhadas
+
+### Melhoria 1: Tela de Login
+- Implementar interface web de autenticação
+- Integrar com Laravel Sanctum para sessões web
+- Criar views para login, logout e recuperação de senha
+- Implementar middleware de autenticação para rotas web
+
+### Melhoria 2: Laravel Pulse
+- Instalar pacote `laravel/pulse`
+- Configurar schema 'pulse' no banco de dados atual
+- Configurar variáveis de ambiente:
+  ```
+  PULSE_DB_CONNECTION=mysql
+  PULSE_DB_SCHEMA=pulse
+  ```
+- Configurar coleta de métricas de performance
+- Implementar dashboard de monitoramento em tempo real
+
+### Melhoria 3: Opcodes Log Viewer
+- Instalar pacote `opcodesio/log-viewer`
+- Configurar visualização de logs do Laravel
+- Implementar interface para análise de logs
+- Configurar filtros e busca em logs
+
+### Melhoria 4: Autenticação em Ferramentas de Monitoramento
+- Implementar middleware de autenticação para rotas do Pulse
+- Proteger rotas do Log Viewer com autenticação
+- Configurar permissões de acesso administrativo
+- Garantir que apenas usuários autenticados acessem ferramentas de monitoramento
+</PRD>

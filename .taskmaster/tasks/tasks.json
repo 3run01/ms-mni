@@ -1,0 +1,81 @@
+{
+  "version": "0.25.1",
+  "name": "task-master-ai",
+  "tags": {
+    "master": {
+      "metadata": {
+        "name": "master",
+        "description": "Main development context",
+        "createdAt": "2025-01-27T10:00:00Z",
+        "lastModified": "2025-01-27T10:00:00Z"
+      },
+      "tasks": []
+    }
+  },
+  "desenvolvimento": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Implementar Tela de Login Web",
+        "description": "Criar interface web de autenticação para o sistema SIM-MNI, integrando com o sistema de autenticação existente (Laravel Sanctum) e implementando views para login, logout e recuperação de senha.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [],
+        "details": "1. Criar AuthController com métodos showLogin(), login(), logout()\n2. Criar views Blade para login (resources/views/auth/login.blade.php)\n3. Implementar LoginRequest com validação de credenciais\n4. Configurar rotas web em routes/web.php\n5. Integrar com sistema de autenticação existente (Sanctum)\n6. Implementar middleware de autenticação web\n7. Criar layout base para interface web",
+        "testStrategy": "1. Interface de login funcional e responsiva\n2. Autenticação integrada com sistema existente\n3. Middleware de autenticação funcionando\n4. Rotas protegidas adequadamente\n5. Logout funcionando corretamente",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Instalar e Configurar Laravel Pulse",
+        "description": "Instalar o pacote Laravel Pulse para monitoramento em tempo real do sistema, configurando as tabelas no schema 'pulse' do banco de dados atual e implementando dashboard de monitoramento.",
+        "status": "done",
+        "priority": "medium",
+        "dependencies": [],
+        "details": "1. Executar composer require laravel/pulse\n2. Executar php artisan pulse:install --database=mysql --schema=pulse\n3. Configurar variáveis de ambiente no .env:\n   PULSE_DB_CONNECTION=mysql\n   PULSE_DB_SCHEMA=pulse\n4. Executar php artisan migrate\n5. Configurar coleta de métricas no AppServiceProvider\n6. Implementar dashboard de monitoramento\n7. Configurar coleta de métricas personalizadas se necessário",
+        "testStrategy": "1. Pacote instalado e configurado corretamente\n2. Tabelas criadas no schema 'pulse'\n3. Dashboard de monitoramento acessível\n4. Métricas sendo coletadas em tempo real\n5. Configuração de ambiente funcionando",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Instalar e Configurar Opcodes Log Viewer",
+        "description": "Instalar o pacote Opcodes Log Viewer para visualização e análise de logs do sistema, implementando interface para análise de logs com filtros e busca.",
+        "status": "done",
+        "priority": "medium",
+        "dependencies": [],
+        "details": "1. Executar composer require opcodesio/log-viewer\n2. Executar php artisan log-viewer:install\n3. Configurar visualização de logs do Laravel\n4. Implementar interface para análise de logs\n5. Configurar filtros e busca em logs\n6. Integrar com sistema de logging existente\n7. Configurar permissões de acesso",
+        "testStrategy": "1. Pacote instalado e configurado\n2. Interface de visualização de logs funcionando\n3. Filtros e busca implementados\n4. Integração com sistema de logging existente\n5. Performance adequada para análise de logs",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Implementar Autenticação em Ferramentas de Monitoramento",
+        "description": "Implementar middleware de autenticação para proteger as rotas do Laravel Pulse e Opcodes Log Viewer, garantindo que apenas usuários autenticados tenham acesso às ferramentas de monitoramento.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          "1"
+        ],
+        "details": "1. Criar middleware AuthenticateAdmin baseado no ValidateApiToken existente\n2. Configurar rotas do Pulse com middleware de autenticação\n3. Configurar rotas do Log Viewer com middleware de autenticação\n4. Implementar verificação de permissões administrativas\n5. Configurar redirecionamento para login quando não autenticado\n6. Testar acesso restrito às ferramentas\n7. Documentar configuração de permissões",
+        "testStrategy": "1. Middleware de autenticação funcionando\n2. Rotas do Pulse protegidas\n3. Rotas do Log Viewer protegidas\n4. Redirecionamento para login funcionando\n5. Acesso restrito funcionando corretamente",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "Melhoria na Consulta de Processos",
+        "description": "Implementar melhorias na funcionalidade de consulta de processos (detalhes a serem especificados).",
+        "status": "done",
+        "priority": "medium",
+        "dependencies": [],
+        "details": "Detalhes da melhoria serão especificados pelo usuário.",
+        "testStrategy": "A ser definido após especificação dos detalhes.",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-09-05T12:01:51.161Z",
+      "updated": "2025-09-08T14:34:53.844Z",
+      "description": "Contexto de desenvolvimento principal"
+    }
+  }
+}

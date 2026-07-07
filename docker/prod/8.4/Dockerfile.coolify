@@ -1,0 +1,172 @@
+# =============================================================================
+# sim-mni — Imagem de produção (Coolify)
+#
+# Multi-stage build:
+#   1. bun      — fornece o binário do Bun para a stage de assets
+#   2. php-base — frankenphp + libs de runtime + extensões PHP
+#                 (não usa nenhum ARG do Coolify, então o cache é estável)
+#   3. vendor   — composer install --no-dev (cacheia em composer.lock)
+#   4. assets   — npm ci && npm run build em node:alpine
+#   5. runtime  — imagem final, herda da php-base com vendor + assets copiados
+# =============================================================================
+
+# =============================================================================
+# Stage: bun (apenas para copiar o binário)
+# =============================================================================
+FROM oven/bun:1-alpine AS bun
+
+# =============================================================================
+# Stage: php-base — base estável compartilhada por vendor e runtime
+# =============================================================================
+FROM dunglas/frankenphp:1-php8.4-alpine AS php-base
+
+LABEL maintainer="Pedro Viana"
+
+ARG POSTGRES_VERSION=17
+
+ENV TZ=America/Sao_Paulo
+
+WORKDIR /var/www/html
+
+ADD --chmod=0755 https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
+
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Runtime deps. Sem compiladores (install-php-extensions cuida disso internamente),
+# sem browsers, sem ffmpeg, sem profilers de dev. Mantém as libs leves de X11/
+# fontes que o binário do wkhtmltopdf precisa para renderizar PDF.
+RUN apk add --no-cache \
+        bash \
+        su-exec \
+        curl \
+        ca-certificates \
+        zip \
+        unzip \
+        git \
+        supervisor \
+        libcap \
+        shadow \
+        tzdata \
+        procps \
+        libsodium \
+        brotli \
+        librsvg \
+        # wkhtmltopdf/wkhtmltoimage runtime deps
+        libx11 \
+        libxext \
+        libxrender \
+        libxcb \
+        fontconfig \
+        freetype \
+        libpng \
+        libjpeg-turbo \
+        ttf-dejavu \
+    && (apk add --no-cache postgresql${POSTGRES_VERSION}-client \
+        || apk add --no-cache postgresql16-client)
+
+# Extensões PHP de produção. xdebug e pcov ficam fora.
+RUN install-php-extensions \
+        bcmath \
+        bz2 \
+        exif \
+        excimer \
+        gd \
+        igbinary \
+        intl \
+        ldap \
+        mbstring \
+        memcached \
+        opcache \
+        pcntl \
+        pdo_pgsql \
+        pgsql \
+        redis \
+        sockets \
+        soap \
+        uv \
+        vips \
+        zip \
+    && docker-php-source delete \
+    && rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+RUN setcap "cap_net_bind_service=+ep" /usr/local/bin/php \
+    && ln -sf /usr/local/bin/php /usr/bin/php \
+    && rm -rf /root/.postgresql
+
+# =============================================================================
+# Stage: vendor — composer install (cache em composer.json/composer.lock)
+# =============================================================================
+FROM php-base AS vendor
+
+COPY composer.json composer.lock ./
+
+RUN php -d memory_limit=-1 /usr/bin/composer install \
+        --no-dev \
+        --no-interaction \
+        --no-scripts \
+        --prefer-dist \
+        --no-autoloader
+
+# =============================================================================
+# Stage: assets — npm ci && npm run build (cache em package-lock.json)
+# =============================================================================
+FROM node:22-alpine AS assets
+
+WORKDIR /app
+
+# Bun disponível caso algum script de build use
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+# =============================================================================
+# Stage: runtime — imagem final servida pelo Coolify
+# =============================================================================
+FROM php-base AS runtime
+
+ARG WWWGROUP=1000
+
+ENV SUPERVISOR_PHP_COMMAND="/usr/local/bin/php -d variables_order=EGPCS /var/www/html/artisan octane:start --server=frankenphp --host=0.0.0.0 --port=80 --admin-port=2019"
+ENV SUPERVISOR_PHP_USER="sail"
+ENV PYTHONWARNINGS="ignore::UserWarning:supervisor.options"
+
+# Usuário sail
+RUN (addgroup -g $WWWGROUP sail 2>/dev/null || addgroup sail) \
+    && adduser -D -s /bin/bash -G sail -u 1337 sail \
+    && addgroup sail root \
+    && git config --global --add safe.directory /var/www/html \
+    && su sail -c "git config --global --add safe.directory /var/www/html" \
+    && mkdir -p /var/log/supervisor
+
+# Código da aplicação
+COPY --chown=sail:sail . .
+
+# Vendor pré-instalado da stage `vendor`
+COPY --from=vendor --chown=sail:sail /var/www/html/vendor ./vendor
+
+# Assets buildados da stage `assets`
+COPY --from=assets --chown=sail:sail /app/public/build ./public/build
+
+# Autoload otimizado com o código presente
+RUN rm -f bootstrap/cache/packages.php bootstrap/cache/services.php 2>/dev/null || true \
+    && php -d memory_limit=-1 /usr/bin/composer dump-autoload --optimize --no-dev --no-scripts
+
+# Configs e scripts
+COPY docker/prod/8.4/php.ini /usr/local/etc/php/conf.d/custom.ini
+COPY docker/prod/8.4/start-container /usr/local/bin/start-container
+COPY docker/prod/8.4/supervisord-coolify.conf /etc/supervisor/conf.d/supervisord.conf
+
+RUN chmod +x /usr/local/bin/start-container \
+    && chown -R sail:sail /var/www/html \
+    && chmod -R 755 /var/www/html/storage /var/www/html/bootstrap/cache
+
+EXPOSE 80/tcp
+
+ENTRYPOINT ["start-container"]
