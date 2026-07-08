@@ -100,9 +100,6 @@ return [
         'redis:alta' => 30,
         'redis:default' => 120,
         'redis:mni-download' => 60,
-        'redis:ocr-mni-download' => 60,
-        'redis:ocr' => 300,
-        'redis:ocr-request' => 60,
         'redis:exportar-processo' => 180,
     ],
 
@@ -237,57 +234,6 @@ return [
             'nice' => 0,
         ],
 
-        'supervisor-ocr-mni-download' => [
-            'connection' => 'redis',
-            'queue' => ['ocr-mni-download'],
-            'balance' => 'auto',
-            'autoScalingStrategy' => 'time',
-            'minProcesses' => 1,
-            'maxProcesses' => 1,
-            'balanceMaxShift' => 1,
-            'balanceCooldown' => 3,
-            'maxTime' => 1800,
-            'maxJobs' => 0,
-            'memory' => 512,
-            'tries' => 3,
-            'timeout' => 300,
-            'nice' => 0,
-        ],
-
-        // 'supervisor-ocr' => [
-        //     'connection' => 'redis',
-        //     'queue' => ['ocr'],
-        //     'balance' => 'auto',
-        //     'autoScalingStrategy' => 'time',
-        //     'minProcesses' => 1,
-        //     'maxProcesses' => 1,
-        //     'balanceMaxShift' => 1,
-        //     'balanceCooldown' => 3,
-        //     'maxTime' => 1800,
-        //     'maxJobs' => 0,
-        //     'memory' => 1024,
-        //     'tries' => 3,
-        //     'timeout' => 1800,
-        //     'nice' => 0,
-        // ],
-
-        'supervisor-ocr-request' => [
-            'connection' => 'redis',
-            'queue' => ['ocr-request'],
-            'balance' => 'simple',
-            'autoScalingStrategy' => 'time',
-            'minProcesses' => 1,
-            'maxProcesses' => 1,
-            'balanceMaxShift' => 1,
-            'balanceCooldown' => 3,
-            'maxTime' => 1800,
-            'maxJobs' => 0,
-            'memory' => 256,
-            'tries' => 3,
-            'timeout' => 60,
-            'nice' => 0,
-        ],
-
         'supervisor-exportar' => [
             'connection' => 'redis',
             'queue' => ['exportar-processo'],
@@ -314,15 +260,6 @@ return [
             'supervisor-mni-download' => [
                 'maxProcesses' => 8,
             ],
-            'supervisor-ocr-mni-download' => [
-                'maxProcesses' => 8,
-            ],
-            // 'supervisor-ocr' => [
-            //     'maxProcesses' => 8,
-            // ],
-            'supervisor-ocr-request' => [
-                'maxProcesses' => 1,
-            ],
             'supervisor-exportar' => [
                 'maxProcesses' => 1,
             ],
@@ -334,15 +271,6 @@ return [
             ],
             'supervisor-mni-download' => [
                 'maxProcesses' => 4,
-            ],
-            'supervisor-ocr-mni-download' => [
-                'maxProcesses' => 2,
-            ],
-            // 'supervisor-ocr' => [
-            //     'maxProcesses' => 2,
-            // ],
-            'supervisor-ocr-request' => [
-                'maxProcesses' => 3,
             ],
             'supervisor-exportar' => [
                 'maxProcesses' => 2,
