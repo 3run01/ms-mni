@@ -4,7 +4,6 @@ namespace App\Services\Processo;
 
 use App\Exceptions\MNIException;
 use App\Jobs\BaixarDocumentoMNIJob;
-use App\Models\Processo;
 use App\Models\ProcessoDocumento;
 use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
 use Carbon\Carbon;
