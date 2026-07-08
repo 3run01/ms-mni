@@ -23,9 +23,6 @@ Route::middleware(ValidateApiToken::class)->group(function () {
     Route::get('/processo/consultar', [ConsultarProcessoController::class, 'index']);
     Route::get('/processo/visualizar', [ConsultarProcessoController::class, 'show']);
 
-    //rota para visualizar processo sem o tribunal_id
-    Route::get('/processo/visualizar2', [ConsultarProcessoController::class, 'show2']);
-
     Route::get('/documento/visualizar', [DocumentoController::class, 'show']);
     Route::resource('/tribunais', TribunalController::class)->only(['index', 'show']);
     Route::get('/processo-pje/consultar', [ConsultarProcessoController::class, 'consultarPje']);
@@ -46,5 +43,4 @@ Route::middleware(ValidateApiToken::class)->group(function () {
     Route::post('/processo/ocr', [OCRProcessoController::class, 'store']);
     Route::post('/documento/ocr', [OCRDocumentoController::class, 'store']);
 
-    // Route::get('/processo/download', [DownloadProcessoController::class, 'index']);
 });

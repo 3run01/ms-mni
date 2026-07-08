@@ -235,25 +235,4 @@ class ConsultarProcessoController extends Controller
 
         return response()->json($processo);
     }
-
-    // public function consultarPje(Request $request): JsonResponse
-    // {
-    //     $tribunal = $request->tribunal_id ? Tribunal::find($request->tribunal_id) : null;
-    //     $response = $this->consultarProcessoService->execute(
-    //         $request->numero_processo ?? null,
-    //         $tribunal->sigla ?? null,
-    //         $request->nome_parte ?? null,
-    //         $request->data_disponibilizacao_inicio ?? null,
-    //         $request->data_disponibilizacao_fim ?? null,
-    //         $request->pagina ?? null
-    //     );
-
-    //     // dd($response['items']);
-    //     // if (isset($response['items']) || is_array($response['items'])) {
-    //     // return ConsultarProcessoApiComunicacaoPJeResource::collection($response['items'])->response();
-    //     // }
-
-    //     // dd($response['items']);
-    //     return (new ConsultarProcessoApiComunicacaoPJeResource($response['items']))->response();
-    // }
 }
