@@ -30,6 +30,11 @@ class ConsultarProcessoController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         try {
             if (!$request->tribunal_id) {
                 return response()->json(['error' => 'Tribunal não informado'], 400);
@@ -49,6 +54,11 @@ class ConsultarProcessoController extends Controller
 
     public function show(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         try {
             if (!$request->tribunal_id) {
                 return response()->json(['error' => 'Tribunal não informado'], 400);
@@ -111,10 +121,11 @@ class ConsultarProcessoController extends Controller
 
         if ($processos->total() == 0) {
             //baixa o processo caso nao exista
-            $processoService = new ProcessoService();
-            $processoService->consultarNumero(
+            $this->processoService->consultarNumero(
                 Tribunal::find($request->tribunal_id),
-                $numero_processo
+                $numero_processo,
+                $request->login_pje,
+                $request->senha_pje
             );
 
             $processos = Processo::where('numero_processo', $numero_processo)
