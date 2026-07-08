@@ -220,30 +220,4 @@ class ConsultarProcessoController extends Controller
         ConsultarMovimentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
     }
 
-    public function show2(Request $request)
-    {
-        $numero_processo = cleanNumeroProcesso($request->numero_processo);
-
-        $with = [
-            'tribunal',
-            'partes',
-            'prioridades',
-            'classe',
-            'assuntos',
-            'movimentos',
-            'documentos' => function ($q) {
-                $q->select('id', 'id_documento', 'descricao', 'id_documento_vinculado', 'movimento', 'tipo_documento', 'data_hora', 'nivel_sigilo', 'processo_id');
-            },
-        ];
-
-        $processo = Processo::with($with)
-            ->where('numero_processo', cleanNumeroProcesso($numero_processo))
-            ->first();
-
-        if (empty($processo)) {
-            return response()->json(['error' => 'Processo não encontrado'], 404);
-        }
-
-        return response()->json($processo);
-    }
 }

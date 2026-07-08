@@ -112,3 +112,21 @@ it('dados-basicos continua funcionando sem credenciais (fallback tribunal)', fun
 
     $response->assertOk();
 });
+
+it('movimentos continua funcionando sem credenciais (fallback tribunal)', function () {
+    $processo = criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
+
+    $this->mock(ProcessoService::class, function ($mock) use ($processo) {
+        $mock->shouldReceive('consultarMovimentos')
+            ->once()
+            ->withArgs(function ($tribunal, $numero, $login, $senha, $dataReferencia) {
+                return $login === null && $senha === null;
+            })
+            ->andReturn($processo);
+    });
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/movimentos/listar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003');
+
+    $response->assertOk();
+});
