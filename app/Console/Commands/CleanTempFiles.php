@@ -12,7 +12,7 @@ class CleanTempFiles extends Command
      *
      * @var string
      */
-    protected $signature = 'ocr:clean-temp {--hours=24 : Arquivos mais antigos que X horas}';
+    protected $signature = 'app:clean-temp {--hours=24 : Arquivos mais antigos que X horas}';
 
     /**
      * The console command description.

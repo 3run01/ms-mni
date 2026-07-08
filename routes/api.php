@@ -7,17 +7,11 @@ use App\Http\Controllers\Api\ConsultarProcessoController;
 use App\Http\Controllers\Api\DocumentoController;
 use App\Http\Controllers\Api\DownloadProcessoController;
 use App\Http\Controllers\Api\TribunalController;
-use App\Http\Controllers\Api\OCRProcessoController;
-use App\Http\Controllers\Api\OCRDocumentoController;
-use App\Http\Controllers\Api\OCRWebhookController;
 use App\Http\Middleware\ValidateApiToken;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
 })->middleware('auth:sanctum');
-
-// Webhook do microserviço SIM OCR (sem autenticação de usuário)
-Route::post('/ocr/webhook', [OCRWebhookController::class, 'store']);
 
 Route::middleware(ValidateApiToken::class)->group(function () {
     Route::get('/processo/consultar', [ConsultarProcessoController::class, 'index']);
@@ -25,7 +19,6 @@ Route::middleware(ValidateApiToken::class)->group(function () {
 
     Route::get('/documento/visualizar', [DocumentoController::class, 'show']);
     Route::resource('/tribunais', TribunalController::class)->only(['index', 'show']);
-    Route::get('/processo-pje/consultar', [ConsultarProcessoController::class, 'consultarPje']);
     Route::post('/processo/download', [DownloadProcessoController::class, 'store']);
 
     //consultar dados basicos, movimentos e documentos
@@ -33,14 +26,9 @@ Route::middleware(ValidateApiToken::class)->group(function () {
     Route::get('/processo/movimentos/listar', [ConsultarProcessoController::class, 'consultarMovimentos']);
     Route::get('/processo/documentos/listar', [DocumentoController::class, 'listarDocumentos']);
 
-
     Route::group(['prefix' => '/processo/consultar'], function () {
         Route::get('/dados-basicos/async', [ConsultarProcessoController::class, 'consultarDadosBasicosAsync']);
         Route::get('/movimentos/async', [ConsultarProcessoController::class, 'consultarMovimentosAsync']);
         Route::get('/documentos/async', [DocumentoController::class, 'consultarDocumentosAsync']);
     });
-
-    Route::post('/processo/ocr', [OCRProcessoController::class, 'store']);
-    Route::post('/documento/ocr', [OCRDocumentoController::class, 'store']);
-
 });

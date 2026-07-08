@@ -78,7 +78,7 @@ class ConsultarProcessoController extends Controller
                 'assuntos',
                 'movimentos',
                 'documentos' => function ($q) {
-                    $q->select('id', 'id_documento', 'descricao', 'id_documento_vinculado', 'movimento', 'tipo_documento', 'data_hora', 'nivel_sigilo', 'processo_id', 'ocr_processado');
+                    $q->select('id', 'id_documento', 'descricao', 'id_documento_vinculado', 'movimento', 'tipo_documento', 'data_hora', 'nivel_sigilo', 'processo_id');
                 },
             ];
 
