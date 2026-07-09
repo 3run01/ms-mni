@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 
 class Notificacao extends Model
 {
-    const TIPO_OCR_PROCESSO = 'OCRProcesso';
     const TIPO_DOWNLOAD_PROCESSO = 'DownloadProcesso';
 
     protected $table = 'notificacoes';

@@ -191,15 +191,3 @@ function verificarPermissao($permissao)
 
     return false; // Retorna false se o usuário não estiver autenticado
 }
-
-if (!function_exists('samia')) {
-    /**
-     * Helper para acessar o serviço Samia
-     *
-     * @return \App\Services\SamiaService
-     */
-    function samia(): \App\Services\SamiaService
-    {
-        return app(\App\Services\SamiaService::class);
-    }
-}

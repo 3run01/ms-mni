@@ -4,8 +4,6 @@ namespace App\Services\Processo;
 
 use App\Exceptions\MNIException;
 use App\Jobs\BaixarDocumentoMNIJob;
-use App\Jobs\OCRRequestJob;
-use App\Models\Processo;
 use App\Models\ProcessoDocumento;
 use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
 use Carbon\Carbon;
@@ -128,12 +126,6 @@ class SalvarDocumentoProcessoService
             $documento->status = ProcessoDocumento::STATUS_BAIXADO;
             $documento->path = $path;
             $documento->save();
-
-            // Aguarda um momento para garantir que o arquivo esteja disponível
-            sleep(1);
-
-            // Realiza OCR
-            $this->realizarOCR($documento);
 
             // Recarrega o documento do banco para garantir dados atualizados
             return ProcessoDocumento::find($documento->id);
@@ -746,21 +738,6 @@ class SalvarDocumentoProcessoService
                 'line' => $e->getLine()
             ]);
             return null;
-        }
-    }
-
-    public function realizarOCR($documento)
-    {
-        if (
-            !$documento->ocr_enviado_fila &&
-            !$documento->ocr_processado &&
-            in_array($documento->processo?->knowledge_base_status_sync, [
-                Processo::KNOWLEDGE_BASE_STATUS_STARTING,
-                Processo::KNOWLEDGE_BASE_STATUS_IN_PROGRESS,
-                Processo::KNOWLEDGE_BASE_STATUS_COMPLETE
-            ])
-        ) {
-            OCRRequestJob::dispatch($documento)->onQueue('ocr-request');
         }
     }
 }

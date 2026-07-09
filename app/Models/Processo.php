@@ -29,20 +29,6 @@ class Processo extends Model
     const STATUS_PETICIONADO = 'Peticionado';
     const STATUS_ARQUIVADO = 'Arquivado';
 
-    const KNOWLEDGE_BASE_STATUS_PENDING = 'PENDING';
-    const KNOWLEDGE_BASE_STATUS_STARTING = 'STARTING';
-    const KNOWLEDGE_BASE_STATUS_IN_PROGRESS = 'IN_PROGRESS';
-    const KNOWLEDGE_BASE_STATUS_COMPLETE = 'COMPLETE';
-    const KNOWLEDGE_BASE_STATUS_FAILED = 'FAILED';
-    const KNOWLEDGE_BASE_STATUS_STOPPING = 'STOPPING';
-    const KNOWLEDGE_BASE_STATUS_STOPPED = 'STOPPED';
-    const KNOWLEDGE_BASE_STATUS_UNKNOWN = 'UNKNOWN';
-
-    const OCR_STATUS_PENDENTE = 'PENDENTE';
-    const OCR_STATUS_PROCESSANDO = 'PROCESSANDO';
-    const OCR_STATUS_CONCLUIDO = 'CONCLUIDO';
-    const OCR_STATUS_FALHA = 'FALHA';
-
     protected $logName = 'Processo';
     protected $table = 'processos';
     protected $with = [
@@ -75,11 +61,6 @@ class Processo extends Model
         'nome_orgao_julgador',
         'codigo_orgao_julgador',
         'instancia_orgao_julgador',
-        'knowledge_base_status_sync',
-        'knowledge_base_sequence_job',
-        'knowledge_base_created_at',
-        'ocr_status',
-        // 'knowledge_base_ingestion_job_id',
     ];
 
     protected $hidden = [

@@ -30,6 +30,11 @@ class ConsultarProcessoController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         try {
             if (!$request->tribunal_id) {
                 return response()->json(['error' => 'Tribunal não informado'], 400);
@@ -49,6 +54,11 @@ class ConsultarProcessoController extends Controller
 
     public function show(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         try {
             if (!$request->tribunal_id) {
                 return response()->json(['error' => 'Tribunal não informado'], 400);
@@ -68,7 +78,7 @@ class ConsultarProcessoController extends Controller
                 'assuntos',
                 'movimentos',
                 'documentos' => function ($q) {
-                    $q->select('id', 'id_documento', 'descricao', 'id_documento_vinculado', 'movimento', 'tipo_documento', 'data_hora', 'nivel_sigilo', 'processo_id', 'ocr_processado');
+                    $q->select('id', 'id_documento', 'descricao', 'id_documento_vinculado', 'movimento', 'tipo_documento', 'data_hora', 'nivel_sigilo', 'processo_id');
                 },
             ];
 
@@ -111,10 +121,11 @@ class ConsultarProcessoController extends Controller
 
         if ($processos->total() == 0) {
             //baixa o processo caso nao exista
-            $processoService = new ProcessoService();
-            $processoService->consultarNumero(
+            $this->processoService->consultarNumero(
                 Tribunal::find($request->tribunal_id),
-                $numero_processo
+                $numero_processo,
+                $request->login_pje,
+                $request->senha_pje
             );
 
             $processos = Processo::where('numero_processo', $numero_processo)
@@ -209,51 +220,4 @@ class ConsultarProcessoController extends Controller
         ConsultarMovimentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
     }
 
-    public function show2(Request $request)
-    {
-        $numero_processo = cleanNumeroProcesso($request->numero_processo);
-
-        $with = [
-            'tribunal',
-            'partes',
-            'prioridades',
-            'classe',
-            'assuntos',
-            'movimentos',
-            'documentos' => function ($q) {
-                $q->select('id', 'id_documento', 'descricao', 'id_documento_vinculado', 'movimento', 'tipo_documento', 'data_hora', 'nivel_sigilo', 'processo_id');
-            },
-        ];
-
-        $processo = Processo::with($with)
-            ->where('numero_processo', cleanNumeroProcesso($numero_processo))
-            ->first();
-
-        if (empty($processo)) {
-            return response()->json(['error' => 'Processo não encontrado'], 404);
-        }
-
-        return response()->json($processo);
-    }
-
-    // public function consultarPje(Request $request): JsonResponse
-    // {
-    //     $tribunal = $request->tribunal_id ? Tribunal::find($request->tribunal_id) : null;
-    //     $response = $this->consultarProcessoService->execute(
-    //         $request->numero_processo ?? null,
-    //         $tribunal->sigla ?? null,
-    //         $request->nome_parte ?? null,
-    //         $request->data_disponibilizacao_inicio ?? null,
-    //         $request->data_disponibilizacao_fim ?? null,
-    //         $request->pagina ?? null
-    //     );
-
-    //     // dd($response['items']);
-    //     // if (isset($response['items']) || is_array($response['items'])) {
-    //     // return ConsultarProcessoApiComunicacaoPJeResource::collection($response['items'])->response();
-    //     // }
-
-    //     // dd($response['items']);
-    //     return (new ConsultarProcessoApiComunicacaoPJeResource($response['items']))->response();
-    // }
 }

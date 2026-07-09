@@ -30,15 +30,10 @@ class ProcessoDocumento extends Model
         'file_size',
         'tentativas_download',
         'erro_mni',
-        'ocr_processado',
-        'ocr_enviado_fila',
-        'ocr_concluido_data',
-        'ocr_job_id'
     ];
 
     protected $casts = [
         'id_documento' => 'integer',
-        'ocr_concluido_data' => 'datetime',
     ];
 
     protected $hidden = [

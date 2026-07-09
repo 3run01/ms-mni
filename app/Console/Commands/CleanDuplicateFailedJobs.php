@@ -12,7 +12,7 @@ class CleanDuplicateFailedJobs extends Command
      *
      * @var string
      */
-    protected $signature = 'ocr:clean-duplicate-jobs {--dry-run : Simular a limpeza sem deletar}';
+    protected $signature = 'app:clean-duplicate-failed-jobs {--dry-run : Simular a limpeza sem deletar}';
 
     /**
      * The console command description.
