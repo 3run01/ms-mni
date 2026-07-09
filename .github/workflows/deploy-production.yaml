@@ -1,0 +1,46 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy-coolify:
+    name: Deploy to Coolify
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Trigger Coolify deployment
+        run: |
+          if [ -z "${{ secrets.COOLIFY_WEBHOOK_URL }}" ]; then
+            echo "COOLIFY_WEBHOOK_URL secret not set. Skipping deployment."
+            echo "To enable auto-deployment, add COOLIFY_WEBHOOK_URL to GitHub secrets."
+            exit 0
+          fi
+
+          echo "Triggering Coolify deployment..."
+
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            --request GET "${{ secrets.COOLIFY_WEBHOOK_URL }}" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_API_TOKEN }}")
+
+          echo "HTTP Status: $response"
+
+          if [ "$response" = "200" ] || [ "$response" = "201" ] || [ "$response" = "204" ]; then
+            echo "Coolify deployment triggered successfully!"
+          else
+            echo "Failed to trigger Coolify deployment. HTTP Status: $response"
+            echo "Please verify COOLIFY_WEBHOOK_URL and COOLIFY_API_TOKEN secrets"
+            exit 1
+          fi
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Deployed to Coolify" >> $GITHUB_STEP_SUMMARY
