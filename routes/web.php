@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\DownloadProcessoController;
 use App\Http\Controllers\AuthController;
 // use App\Http\Controllers\Api\TribunalController;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 // Rotas públicas
 Route::get('/', function () {
@@ -21,7 +22,7 @@ Route::middleware('guest')->group(function () {
 Route::middleware('auth:web')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/dashboard', function () {
-        return view('dashboard');
+        return Inertia::render('dashboard');
     })->name('dashboard');
 
     // Rotas protegidas existentes
