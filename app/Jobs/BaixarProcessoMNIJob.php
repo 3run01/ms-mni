@@ -40,7 +40,7 @@ class BaixarProcessoMNIJob implements ShouldQueue
     public function handle(): void
     {
         try {
-            $service = new ProcessoService();
+            $service = app(ProcessoService::class);
 
             $service->consultarDadosBasicos(
                 $this->tribunal,
