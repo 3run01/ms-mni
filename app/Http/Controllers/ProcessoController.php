@@ -20,6 +20,7 @@ class ProcessoController extends Controller
             ->when($filtros['busca'] ?? null,
                 fn ($q, $v) => $q->where('numero_processo', 'ilike', "%{$v}%"))
             ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->paginate(20)
             ->withQueryString()
             ->through(fn (Processo $p) => [
