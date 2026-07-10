@@ -23,8 +23,6 @@ class Tribunal extends Model
     protected $table = 'tribunais';
     protected $fillable = [
         'nome',
-        'codigo_tribunal',
-        'segmento_justica',
         'login',
         'password',
         'url_webservice_mni',
@@ -32,13 +30,16 @@ class Tribunal extends Model
         'url_webservice_mni_complementar',
         'url_consulta_pje',
         'url_webservice_mni_criminal',
+        'url_recuperar_senha_tribunal',
         'tipo',
         'ativo',
-        'url_recuperar_senha_tribunal',
         'codigo_peticao_inicial',
         'codigo_peticao_avulsa',
         'codigo_certidao_inicio_fim',
+        'codigo_seeu',
+        'usar_codigo_documento_padrao',
         'enviar_dados_criminais',
+        'usar_credencial_tribunal',
         'versao_mni',
     ];
 
@@ -60,7 +61,14 @@ class Tribunal extends Model
         parent::boot();
 
         static::creating(function ($model) {
-            $model->uuid = Str::uuid();
+            static $temUuid = null;
+            $temUuid ??= $model->getConnection()
+                ->getSchemaBuilder()
+                ->hasColumn($model->getTable(), 'uuid');
+
+            if ($temUuid) {
+                $model->uuid = Str::uuid();
+            }
         });
     }
 

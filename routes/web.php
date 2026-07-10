@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\TribunalController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -20,4 +21,11 @@ Route::middleware('auth:web')->group(function () {
     Route::get('/dashboard', function () {
         return Inertia::render('dashboard');
     })->name('dashboard');
+
+    Route::get('/tribunais', [TribunalController::class, 'index'])->name('tribunais.index');
+    Route::get('/tribunais/criar', [TribunalController::class, 'create'])->name('tribunais.create');
+    Route::post('/tribunais', [TribunalController::class, 'store'])->name('tribunais.store');
+    Route::get('/tribunais/{tribunal}/editar', [TribunalController::class, 'edit'])->name('tribunais.edit');
+    Route::put('/tribunais/{tribunal}', [TribunalController::class, 'update'])->name('tribunais.update');
+    Route::patch('/tribunais/{tribunal}/ativo', [TribunalController::class, 'toggleAtivo'])->name('tribunais.toggle');
 });
