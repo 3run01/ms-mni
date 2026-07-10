@@ -102,7 +102,7 @@ class ConsultarProcessoController extends Controller
                     ->where('tribunal_id', $request->tribunal_id)
                     ->first();
             } else {
-                BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo);
+                BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo, $request->login_pje, $request->senha_pje);
             }
 
             return response()->json($processo);
@@ -132,7 +132,7 @@ class ConsultarProcessoController extends Controller
                 ->paginate(self::DEFAULT_PER_PAGE);
         } else {
             //atualiza o processo em background caso existe
-            BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo);
+            BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo, $request->login_pje, $request->senha_pje);
         }
 
         return response()->json($processos);

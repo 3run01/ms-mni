@@ -90,6 +90,20 @@ it('visualizar com credenciais e processo existente retorna 200', function () {
     Queue::assertPushed(BaixarProcessoMNIJob::class);
 });
 
+it('visualizar processo existente agenda refresh com as credenciais do payload', function () {
+    Queue::fake();
+    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/visualizar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=u-pje&senha_pje=s-pje')
+        ->assertOk();
+
+    Queue::assertPushed(
+        BaixarProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'u-pje' && $job->senha_pje === 's-pje'
+    );
+});
+
 it('visualizar com processo inexistente repassa credenciais ao ProcessoService', function () {
     $this->mock(ProcessoService::class, function ($mock) {
         $mock->shouldReceive('consultarNumero')
