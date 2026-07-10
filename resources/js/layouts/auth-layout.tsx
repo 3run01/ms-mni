@@ -1,9 +1,37 @@
-import { type PropsWithChildren } from 'react';
+import { Link } from '@inertiajs/react';
+import { type ReactNode } from 'react';
 
-export default function AuthLayout({ children }: PropsWithChildren) {
+import AppLogoIcon from '@/components/app-logo-icon';
+
+export default function AuthLayout({
+    title,
+    description,
+    children,
+}: {
+    title: string;
+    description: string;
+    children: ReactNode;
+}) {
     return (
-        <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
-            <div className="w-full max-w-md">{children}</div>
+        <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 md:p-10">
+            <div className="w-full max-w-sm">
+                <div className="flex flex-col gap-8">
+                    <div className="flex flex-col items-center gap-4">
+                        <Link href="/" className="flex flex-col items-center gap-2 font-medium">
+                            <div className="mb-1 flex h-9 w-9 items-center justify-center rounded-md">
+                                <AppLogoIcon className="size-9 text-foreground" />
+                            </div>
+                            <span className="sr-only">{title}</span>
+                        </Link>
+
+                        <div className="space-y-2 text-center">
+                            <h1 className="text-xl font-medium">{title}</h1>
+                            <p className="text-center text-sm text-muted-foreground">{description}</p>
+                        </div>
+                    </div>
+                    {children}
+                </div>
+            </div>
         </div>
     );
 }
