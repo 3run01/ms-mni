@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ApiTokenController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ProcessoController;
 use App\Http\Controllers\TribunalController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -35,4 +36,6 @@ Route::middleware('auth:web')->group(function () {
     Route::post('/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');
     Route::patch('/tokens/{apiToken}/ativo', [ApiTokenController::class, 'toggleAtivo'])->name('tokens.toggle');
     Route::delete('/tokens/{apiToken}', [ApiTokenController::class, 'destroy'])->name('tokens.destroy');
+
+    Route::get('/processos', [ProcessoController::class, 'index'])->name('processos.index');
 });
