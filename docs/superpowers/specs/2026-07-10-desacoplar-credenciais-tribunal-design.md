@@ -93,3 +93,29 @@ Adiciona `login_pje`/`senha_pje` `required|string` e troca `?? null` por passage
 - Remoção de `ValidarCredencialService` (código morto; não lê credencial armazenada).
 - Coluna `uuid` na conexão `sim` / conserto da `Api\TribunalController@show($uuid)` (achado antigo, decisão futura).
 - Roles/permissões no CRUD (qualquer usuário autenticado acessa).
+
+## Emenda 2026-07-10 — colunas NULLABLE em vez de DROP
+
+Durante a execução, o review da Task 1 revelou fatos que invalidam a decisão de dropar as colunas. Além do expediente, há uma família de **fluxos de background sem requester** que consultam o MNI com a credencial ARMAZENADA do tribunal:
+
+- `BaixarProcessoMNIJob` — despachado por `ConsultarProcessoController@show`/`@index` (refresh em background) **sem** repassar as credenciais do request; tem bug pré-existente: passa `data_referencia` no slot `$login`, então sempre rodou no fallback do tribunal.
+- `BaixarDocumentoMNIJob` — despachado por 4 comandos CLI (`media:redownload`, `media:fix-inconsistent`, `media:redownload-test`, `mni:baixar-documento-pendente`) **sem credencial**. Esses comandos varrem documentos por status/mimetype **cruzando vários tribunais numa só execução** — cada documento precisa da credencial do seu próprio tribunal. Sem requester e multi-tribunal, não há um par login/senha único a passar.
+
+Dropar as colunas quebraria todos esses fluxos. Decisão do usuário: **manter as colunas, tornando-as NULLABLE** (não-destrutivo). "Zero credencial em repouso" fica como follow-up separado (aposentar os comandos de bulk ou desenhar persistência de credencial por-consulta).
+
+### O que muda em relação ao corpo acima
+
+1. **Migration:** `ALTER COLUMN login/password DROP NOT NULL` na conexão `sim` (raw statement — `login` é varchar(255), `password` é `text`; preserva os tipos). NÃO dropa colunas. `down()` = `SET NOT NULL`.
+2. **Services:** o fallback `?? $tribunal->login` / `Crypt::decrypt($tribunal->password)` **permanece** (revertido em `f5ed404`) — background depende dele. Só a validação obrigatória dos endpoints (`1c03e4f`) fica.
+3. **Model:** `$fillable` perde `login`/`password`/`usar_credencial_tribunal` (CRUD deixa de gerenciar credencial); **`$hidden` MANTÉM `login`/`password`** (colunas existem e são sensíveis).
+4. **Expediente:** NÃO é removido (funciona via cred armazenada). `ConsultarExpedienteService` e o comando ficam.
+5. **BaixarProcessoMNIJob:** ganha `login_pje`/`senha_pje` no construtor; `show`/`index` passam `$request->login_pje/senha_pje`; conserta o bug do `data_referencia`. O dispatch do expediente segue com creds nulas (fallback — correto pro contexto background).
+6. **Factory:** permanece setando `login`/`password` (colunas existem; inofensivo).
+
+### Consequência aceita
+
+Sem UI de credencial no CRUD, novos tribunais nascem sem `login`/`password` (nulos) e seus fluxos de background falham até a credencial ser setada direto no banco — que é o estado pré-CRUD para credenciais. Consulta interativa desses tribunais funciona normalmente (credencial vem do payload).
+
+### Nota de branch
+
+O trabalho de credenciais foi isolado na branch `feat/credenciais-payload` (a partir de `1c03e4f`), porque a branch original `feat/desacoplar-credenciais-tribunal` passou a receber, em paralelo, commits de outra feature (listagem de processos + spec de tokens de API).

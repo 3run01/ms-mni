@@ -1,399 +1,50 @@
-# Desacoplar credenciais do Tribunal — Implementation Plan
+# Desacoplar credenciais do Tribunal — Implementation Plan (REVISADO: colunas NULLABLE)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development para implementar task-by-task. Steps usam checkbox (`- [ ]`).
 
-**Goal:** A credencial MNI deixa de morar no `Tribunal`; toda consulta de processo passa a exigir `login_pje`/`senha_pje` no payload, e as colunas `login`/`password` são dropadas da tabela `tribunais` (conexão `sim`).
+**Goal:** Toda consulta de processo passa a exigir `login_pje`/`senha_pje` no payload; a credencial deixa de ser gerenciada pelo CRUD; as colunas `login`/`password` viram NULLABLE (não são dropadas — fluxos de background sem requester ainda dependem delas via fallback).
 
-**Architecture:** Refatoração em 5 tarefas ordenadas: primeiro remove-se todo LEITOR da credencial armazenada (services síncronos, jobs async, sweep de expediente), depois dropa-se as colunas com segurança e limpa-se o CRUD/model/factory/frontend. As colunas só caem quando nenhum código as lê.
+**Architecture:** Endpoints interativos (sync + async) validam credencial obrigatória. O fallback de credencial armazenada nos services PERMANECE para os fluxos de background sem requester. `BaixarProcessoMNIJob` passa a receber a credencial do request quando disparado por um endpoint. O CRUD para de gerenciar credencial; a coluna continua existindo (nullable, `$hidden`).
 
-**Tech Stack:** Laravel 11 (slim, sem Console/Kernel), Postgres (conexão `sim` = `sim_producao`), Pest 3, Inertia v2 + React 19 + TypeScript.
+**Tech Stack:** Laravel 11 (slim), Postgres (conexão `sim`), Pest 3, Inertia v2 + React 19 + TypeScript.
 
 ## Global Constraints
 
-- **Nunca escrever direto na conexão `sim`.** Testes que tocam `tribunais` usam a trait `Tests\SimDatabaseTestCase` (`uses(SimDatabaseTestCase::class)`) — rollback via `DatabaseTransactions` com `$connectionsToTransact = ['sim']`. A ÚNICA mudança de schema aprovada em `sim` é a migration da Task 4.
-- **PHP só roda no container:** `docker compose exec php php artisan ...`. NUNCA usar o wrapper `./php` (quebrado). Se o container não estiver de pé: `docker compose up -d --no-deps php`.
-- **Rodar a migration da Task 4 com `--path`** apontando só para o arquivo dela — `php artisan migrate` sem path dispararia também a migration não-rastreada `2026_07_09_000000_seed_admin_user.php` do usuário, que NÃO deve ser executada por nós.
-- **Não tocar** em `database/seeders/UserSeeder.php` nem em `database/migrations/2026_07_09_000000_seed_admin_user.php` (arquivos paralelos do usuário).
-- **Baseline de testes:** 8 falhas pré-existentes no domínio exportação (ExportacaoProcessoServiceTest, DownloadProcessoControllerTest, ExportacaoPipelineTest) — não relacionadas; qualquer falha NOVA além dessas 8 é regressão.
-- A coluna `password` era armazenada CRIPTOGRAFADA (`Crypt::decrypt`); ao dropá-la isso vira irrelevante. A senha do payload é texto puro (sem decrypt).
-- Após deploy, a migration dropa as colunas na `sim` real (perda irreversível das credenciais das 8 rows) — intencional.
+- **Branch:** trabalhar em `feat/credenciais-payload` (isolada; a original recebeu commits paralelos de outra feature).
+- **Nunca escrever direto na conexão `sim`.** Testes que tocam `tribunais` usam a trait `Tests\SimDatabaseTestCase`. A migration da Task 4 (nullable) é a única mudança de schema em `sim`.
+- **PHP só no container:** `docker compose exec php php artisan ...`. NUNCA `./php`.
+- **Rodar a migration da Task 4 com `--path`** — `php artisan migrate` sem path dispararia a migration não-rastreada `2026_07_09_000000_seed_admin_user.php` (não executar).
+- **Não tocar** em `database/seeders/UserSeeder.php` nem em `database/migrations/2026_07_09_000000_seed_admin_user.php`.
+- **Não tocar** em arquivos da feature de processos (`app/Http/Controllers/ProcessoController.php`, `routes/web.php` na parte de `/processos`, `tests/Feature/ProcessoConsultaTest.php`, `tests/MultiConnectionDatabaseTestCase.php`, `database/factories/ProcessoFactory.php`) — não existem nesta branch e não são desta feature.
+- **Fallback de credencial nos services PERMANECE.** A senha vinda do payload é texto puro; a senha armazenada é criptografada (`Crypt::decrypt`) — o fallback lida com a armazenada.
+- **`$hidden` do model MANTÉM `login`/`password`** — as colunas continuam existindo e são sensíveis.
+- **Baseline de testes:** 8 falhas pré-existentes no domínio exportação (não relacionadas).
 
 ---
 
-## File Structure
+## Task 1 — CONCLUÍDA (referência)
 
-**Task 1 — services síncronos payload-only:**
-- Modify: `app/Http/Controllers/Api/ConsultarProcessoController.php` (métodos `consultarDadosBasicos`, `consultarMovimentos`)
-- Modify: `app/Http/Controllers/Api/DocumentoController.php` (métodos `show`, `listarDocumentos`)
-- Modify: `app/Services/MNI/Intercomunicacao/ConsultarProcessoService.php`
-- Modify: `app/Services/MNI/Intercomunicacao/ConsultarDocumentoService.php`
-- Modify: `app/Services/Processo/SalvarDocumentoProcessoService.php` (`downloadMP4`, `downloadQuicktime`)
-- Test: `tests/Feature/Api/ConsultarProcessoControllerTest.php`, `tests/Feature/Api/DocumentoControllerTest.php` (novo)
+Consulta síncrona exige credenciais no payload. **Já implementada** nos commits:
+- `1c03e4f` — validação `login_pje`/`senha_pje` `required` em `consultarDadosBasicos`, `consultarMovimentos` (ConsultarProcessoController) e `show`, `listarDocumentos` (DocumentoController); testes 422 + passthrough.
+- `f5ed404` — revert do fallback dos services (mantido, pois background depende dele).
 
-**Task 2 — endpoints async threading credenciais:**
-- Modify: `app/Jobs/ConsultarDadosBasicosProcessoMNIJob.php`, `app/Jobs/ConsultarMovimentosProcessoMNIJob.php`, `app/Jobs/ConsultarDocumentosProcessoMNIJob.php`
-- Modify: `app/Http/Controllers/Api/ConsultarProcessoController.php` (async), `app/Http/Controllers/Api/DocumentoController.php` (async)
-- Test: `tests/Feature/Api/ConsultarProcessoControllerTest.php`, `tests/Feature/Api/DocumentoControllerTest.php`
-
-**Task 3 — remoção do expediente:**
-- Delete: `app/Services/MNI/Intercomunicacao/ConsultarExpedienteService.php`, `app/Console/Commands/MNIConsultarExpediente.php`
-- Test: `tests/Feature/ExpedienteRemovidoTest.php` (novo)
-
-**Task 4 — migration + model + factory + CRUD backend:**
-- Create: `database/migrations/XXXX_XX_XX_XXXXXX_drop_login_password_from_tribunais.php`
-- Modify: `app/Models/Tribunal.php`, `database/factories/TribunalFactory.php`, `app/Http/Requests/TribunalRequest.php`, `app/Http/Controllers/TribunalController.php`
-- Test: `tests/Feature/TribunalCrudTest.php`
-
-**Task 5 — limpeza do frontend:**
-- Modify: `resources/js/components/tribunal-form.tsx`
+Nada a fazer aqui. As Tasks abaixo são o que resta.
 
 ---
 
-## Task 1: Consulta síncrona exige credenciais no payload; services largam o fallback do tribunal
-
-**Files:**
-- Modify: `app/Http/Controllers/Api/ConsultarProcessoController.php:165-209`
-- Modify: `app/Http/Controllers/Api/DocumentoController.php:27-61`, `:151-178`
-- Modify: `app/Services/MNI/Intercomunicacao/ConsultarProcessoService.php`
-- Modify: `app/Services/MNI/Intercomunicacao/ConsultarDocumentoService.php`
-- Modify: `app/Services/Processo/SalvarDocumentoProcessoService.php:324-344`, `:465-485`
-- Test: `tests/Feature/Api/ConsultarProcessoControllerTest.php`, `tests/Feature/Api/DocumentoControllerTest.php` (novo)
-
-**Interfaces:**
-- Consumes: rotas existentes `GET /api/processo/dados-basicos`, `/api/processo/movimentos/listar`, `/api/documento/visualizar`, `/api/processo/documentos/listar` (auth por header `X-API-Token`).
-- Produces: esses 4 endpoints passam a responder **422** com erros de validação em `login_pje`/`senha_pje` quando ausentes; quando presentes, repassam as credenciais direto (sem `?? null`).
-
-- [ ] **Step 1: Escrever os testes que falham (sync — dados-basicos e movimentos)**
-
-Substituir os DOIS testes obsoletos em `tests/Feature/Api/ConsultarProcessoControllerTest.php` (o bloco atual sob o comentário `// ---------- endpoints que continuam SEM exigir credenciais ----------`, linhas ~105-132) por estes. Adicionar `use App\Models\Processo;` já existe; garantir `use App\Services\Processo\ProcessoService;` (já existe).
-
-```php
-// ---------- endpoints que agora EXIGEM credenciais ----------
-
-it('dados-basicos sem credenciais retorna 422', function () {
-    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
-
-    $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/dados-basicos?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
-});
-
-it('dados-basicos repassa credenciais do payload ao ProcessoService', function () {
-    $this->mock(ProcessoService::class, function ($mock) {
-        $mock->shouldReceive('consultarDadosBasicos')
-            ->once()
-            ->withArgs(fn ($tribunal, $numero, $login, $senha) => $login === 'u-pje' && $senha === 's-pje')
-            ->andReturn(new Processo());
-    });
-
-    $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/dados-basicos?tribunal_id=1&numero_processo=9999999-99.2024.8.03.9999&login_pje=u-pje&senha_pje=s-pje')
-        ->assertOk();
-});
-
-it('movimentos sem credenciais retorna 422', function () {
-    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
-
-    $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/movimentos/listar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
-});
-
-it('movimentos repassa credenciais do payload ao ProcessoService', function () {
-    $processo = criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
-    $processo->setRelation('movimentos', collect());
-
-    $this->mock(ProcessoService::class, function ($mock) use ($processo) {
-        $mock->shouldReceive('consultarMovimentos')
-            ->once()
-            ->withArgs(fn ($tribunal, $numero, $login, $senha, $dataRef) => $login === 'u-pje' && $senha === 's-pje')
-            ->andReturn($processo);
-    });
-
-    $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/movimentos/listar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=u-pje&senha_pje=s-pje')
-        ->assertOk();
-});
-```
-
-- [ ] **Step 2: Escrever os testes que falham (sync — documento)**
-
-Criar `tests/Feature/Api/DocumentoControllerTest.php`:
-
-```php
-<?php
-
-use App\Models\Processo;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
-
-uses(DatabaseTransactions::class);
-
-beforeEach(function () {
-    config()->set('services.api.token', 'tk-test');
-});
-
-it('documento visualizar sem credenciais retorna 422', function () {
-    $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/documento/visualizar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&id_documento=123')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
-});
-
-it('documentos listar sem credenciais retorna 422', function () {
-    Processo::create([
-        'numero_processo' => cleanNumeroProcesso('0600125-81.2024.8.03.0003'),
-        'tribunal_id' => 1,
-        'valor_causa' => '0.00',
-    ]);
-
-    $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/documentos/listar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
-});
-```
-
-- [ ] **Step 3: Rodar os testes e confirmar que falham**
-
-Run: `docker compose exec php php artisan test tests/Feature/Api/ConsultarProcessoControllerTest.php tests/Feature/Api/DocumentoControllerTest.php`
-Expected: FAIL — os endpoints hoje não validam credenciais (retornam 200/500, não 422).
-
-- [ ] **Step 4: Adicionar validação nos endpoints síncronos do `ConsultarProcessoController`**
-
-Em `app/Http/Controllers/Api/ConsultarProcessoController.php`, no método `consultarDadosBasicos` (linha ~165), inserir a validação como primeira instrução e trocar o `?? null`:
-
-```php
-    public function consultarDadosBasicos(Request $request): JsonResponse
-    {
-        $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
-        ]);
-
-        $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        $processo = Processo::with('tribunal', 'classe', 'assuntos', 'prioridades', 'partes.representantesProcessual')
-            ->where('numero_processo', $numero_processo)
-            ->where('tribunal_id', $request->tribunal_id)
-            ->first();
-
-        //Verifica se o processo existe, caso exisa retorna o que está salvo no banco de dados
-        if (!empty($processo)) {
-            return response()->json($processo);
-        }
-
-        $processo = $this->processoService->consultarDadosBasicos(
-            Tribunal::find($request->tribunal_id),
-            $numero_processo,
-            $request->login_pje,
-            $request->senha_pje
-        );
-
-        return response()->json($processo);
-    }
-```
-
-No método `consultarMovimentos` (linha ~188), inserir a mesma validação no topo e trocar o `?? null` (mantendo `data_referencia`):
-
-```php
-    public function consultarMovimentos(Request $request): JsonResponse
-    {
-        $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
-        ]);
-
-        $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        $processo = Processo::with('movimentos')
-            ->where('numero_processo', $numero_processo)
-            ->where('tribunal_id', $request->tribunal_id)
-            ->first();
-
-        if ($processo && $processo->movimentos->count() > 0) {
-            return response()->json($processo->movimentos);
-        }
-
-        $processo = $this->processoService->consultarMovimentos(
-            Tribunal::find($request->tribunal_id),
-            $numero_processo,
-            $request->login_pje,
-            $request->senha_pje,
-            $request->data_referencia ?? null,
-        );
-
-        return response()->json($processo->movimentos);
-    }
-```
-
-- [ ] **Step 5: Adicionar validação nos endpoints síncronos do `DocumentoController`**
-
-Em `app/Http/Controllers/Api/DocumentoController.php`, método `show` (linha ~27), inserir a validação como PRIMEIRA instrução (antes do `try`) e trocar o `?? null`:
-
-```php
-    public function show(Request $request): JsonResponse
-    {
-        $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
-        ]);
-
-        try {
-            $maxTentativas = 3;
-            $tentativa = 0;
-
-            do {
-                $tribunal = Tribunal::find($request->tribunal_id);
-                $documento = $this->getDocumento(
-                    $request->id_documento,
-                    $request->numero_processo,
-                    $tribunal,
-                    $request->login_pje,
-                    $request->senha_pje
-                );
-```
-
-(o restante do método `show` fica inalterado.)
-
-No método `listarDocumentos` (linha ~151), inserir a validação no topo e trocar o `?? null`:
-
-```php
-    public function listarDocumentos(Request $request): JsonResponse
-    {
-        $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
-        ]);
-
-        $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        $processo = Processo::with('documentos')
-            ->where('numero_processo', $numero_processo)
-            ->where('tribunal_id', $request->tribunal_id)
-            ->first();
-
-        if ($processo && $processo->documentos->count() > 0) {
-            return response()->json($processo->documentos);
-        }
-
-        $processo = $this->processoService->consultarDocumentos(
-            Tribunal::find($request->tribunal_id),
-            $numero_processo,
-            $request->login_pje,
-            $request->senha_pje,
-            $request->data_referencia ?? null,
-        );
-
-        // Carregar tipos de documento manualmente para cada documento
-        $documentos = $processo->documentos->map(function ($documento) {
-            $documento->tipo = $documento->getTipoDocumento();
-            return $documento;
-        });
-
-        return response()->json($documentos);
-    }
-```
-
-- [ ] **Step 6: Rodar os testes e confirmar que passam**
-
-Run: `docker compose exec php php artisan test tests/Feature/Api/ConsultarProcessoControllerTest.php tests/Feature/Api/DocumentoControllerTest.php`
-Expected: PASS.
-
-- [ ] **Step 7: Remover o fallback de credencial armazenada dos 3 services**
-
-Estas edições são remoção de código morto: com os endpoints exigindo credenciais, o operador `??` nunca alcança o lado do tribunal. Removê-las evita que, após a Task 4 dropar as colunas, sobre referência a coluna inexistente (`Crypt::decrypt(null)` lançaria).
-
-Em `app/Services/MNI/Intercomunicacao/ConsultarProcessoService.php`:
-- Remover os imports `use Illuminate\Contracts\Encryption\DecryptException;` e `use Illuminate\Support\Facades\Crypt;`.
-- Trocar as duas linhas do `$params`:
-
-```php
-                'idConsultante' => $login_pje,
-                'senhaConsultante' => $senha_pje,
-```
-
-- Remover o bloco `catch (DecryptException $e) { ... }` inteiro (o `catch (MNIException ...)` e `catch (\Exception ...)` permanecem):
-
-```php
-        } catch (MNIException $e) {
-            throw new MNIException($e->getError(), 500);
-        } catch (\Exception $e) {
-            throw new MNIException($e->getMessage(), 500);
-        }
-```
-
-Em `app/Services/MNI/Intercomunicacao/ConsultarDocumentoService.php`:
-- Remover o import `use Illuminate\Support\Facades\Crypt;`.
-- Trocar as duas linhas do `$parametros`:
-
-```php
-                'idConsultante' => $login_pje,
-                'senhaConsultante' => $senha_pje,
-```
-
-Em `app/Services/Processo/SalvarDocumentoProcessoService.php`:
-- Remover o import `use Illuminate\Support\Facades\Crypt;`.
-- Nos métodos `downloadMP4` (linhas ~331-344) e `downloadQuicktime` (linhas ~472-485), substituir o bloco de fallback pelo guard abaixo (nos DOIS métodos):
-
-Trocar:
-
-```php
-            // Se login e senha não forem informados, usar as credenciais do tribunal
-            if (empty($login_pje) || empty($senha_pje)) {
-                $tribunal = $documento->processo->tribunal;
-                if (!$tribunal) {
-                    throw new \Exception('Processo não possui tribunal associado');
-                }
-
-                $login_pje = $tribunal->login;
-                $senha_pje = Crypt::decrypt($tribunal->password);
-
-                if (empty($login_pje) || empty($senha_pje)) {
-                    throw new \Exception('Tribunal não possui credenciais de acesso configuradas');
-                }
-            }
-```
-
-Por:
-
-```php
-            if (empty($login_pje) || empty($senha_pje)) {
-                throw new \Exception('Credenciais MNI/PJ-e obrigatórias para baixar o documento');
-            }
-```
-
-- [ ] **Step 8: Verificar que nenhum leitor de credencial armazenada permanece nesses services**
-
-Run: `grep -rnE '\$tribunal->login|Crypt::decrypt\(\$tribunal->password\)' app/Services/`
-Expected: apenas `app/Services/MNI/Intercomunicacao/ConsultarExpedienteService.php` (removido na Task 3). NENHUMA ocorrência em ConsultarProcessoService, ConsultarDocumentoService ou SalvarDocumentoProcessoService.
-
-- [ ] **Step 9: Rodar a suíte relevante e confirmar verde**
-
-Run: `docker compose exec php php artisan test tests/Feature/Api/`
-Expected: PASS (todos os testes de API verdes).
-
-- [ ] **Step 10: Commit**
-
-```bash
-git add app/Http/Controllers/Api/ConsultarProcessoController.php app/Http/Controllers/Api/DocumentoController.php app/Services/MNI/Intercomunicacao/ConsultarProcessoService.php app/Services/MNI/Intercomunicacao/ConsultarDocumentoService.php app/Services/Processo/SalvarDocumentoProcessoService.php tests/Feature/Api/ConsultarProcessoControllerTest.php tests/Feature/Api/DocumentoControllerTest.php
-git commit -m "feat(mni): consulta síncrona exige credenciais no payload"
-```
-
----
-
-## Task 2: Endpoints async threading credenciais pelo job
+## Task 2: Endpoints async exigem credencial e threading pelo job
 
 **Files:**
 - Modify: `app/Jobs/ConsultarDadosBasicosProcessoMNIJob.php`, `app/Jobs/ConsultarMovimentosProcessoMNIJob.php`, `app/Jobs/ConsultarDocumentosProcessoMNIJob.php`
-- Modify: `app/Http/Controllers/Api/ConsultarProcessoController.php:211-221`, `app/Http/Controllers/Api/DocumentoController.php:180-184`
+- Modify: `app/Http/Controllers/Api/ConsultarProcessoController.php` (métodos `consultarDadosBasicosAsync`, `consultarMovimentosAsync`), `app/Http/Controllers/Api/DocumentoController.php` (`consultarDocumentosAsync`)
 - Test: `tests/Feature/Api/ConsultarProcessoControllerTest.php`, `tests/Feature/Api/DocumentoControllerTest.php`
 
 **Interfaces:**
-- Consumes: rotas `GET /api/processo/dados-basicos/async`, `/api/processo/movimentos/async`, `/api/processo/documentos/async`.
-- Produces: os 3 jobs passam a expor propriedades públicas `login_pje` e `senha_pje`; construtores viram `($tribunal_id, $numero_processo, $login_pje = null, $senha_pje = null)`. Endpoints async respondem 422 sem credenciais e despacham o job com as credenciais do payload.
+- Produces: os 3 jobs ganham propriedades públicas `login_pje`/`senha_pje`; construtor vira `($tribunal_id, $numero_processo, $login_pje = null, $senha_pje = null)`. Endpoints async respondem 422 sem credenciais e despacham o job com as credenciais do payload. Isto também conserta o bug pré-existente do `$request` indefinido em `handle()`.
 
 - [ ] **Step 1: Escrever os testes que falham**
 
-Adicionar em `tests/Feature/Api/ConsultarProcessoControllerTest.php` (garantir imports `use App\Jobs\ConsultarDadosBasicosProcessoMNIJob;` e `use App\Jobs\ConsultarMovimentosProcessoMNIJob;` no topo):
+Adicionar em `tests/Feature/Api/ConsultarProcessoControllerTest.php` (garantir os imports `use App\Jobs\ConsultarDadosBasicosProcessoMNIJob;` e `use App\Jobs\ConsultarMovimentosProcessoMNIJob;`):
 
 ```php
 // ---------- endpoints async ----------
@@ -437,7 +88,7 @@ it('movimentos async despacha job com as credenciais do payload', function () {
 });
 ```
 
-Adicionar em `tests/Feature/Api/DocumentoControllerTest.php` (garantir `use App\Jobs\ConsultarDocumentosProcessoMNIJob;` e `use Illuminate\Support\Facades\Queue;` no topo):
+Adicionar em `tests/Feature/Api/DocumentoControllerTest.php` (garantir `use App\Jobs\ConsultarDocumentosProcessoMNIJob;` e `use Illuminate\Support\Facades\Queue;`):
 
 ```php
 it('documentos async sem credenciais retorna 422', function () {
@@ -463,11 +114,11 @@ it('documentos async despacha job com as credenciais do payload', function () {
 - [ ] **Step 2: Rodar e confirmar falha**
 
 Run: `docker compose exec php php artisan test tests/Feature/Api/ConsultarProcessoControllerTest.php tests/Feature/Api/DocumentoControllerTest.php`
-Expected: FAIL — async hoje não valida credenciais e o job não tem as propriedades `login_pje`/`senha_pje`.
+Expected: FAIL — async não valida credenciais e o job não tem `login_pje`/`senha_pje`.
 
-- [ ] **Step 3: Threading das credenciais nos 3 jobs**
+- [ ] **Step 3: Threading nos 3 jobs**
 
-`app/Jobs/ConsultarDadosBasicosProcessoMNIJob.php` — substituir o bloco de propriedades + construtor + `handle`:
+`app/Jobs/ConsultarDadosBasicosProcessoMNIJob.php` — substituir propriedades + construtor + `handle`:
 
 ```php
     public $numero_processo;
@@ -568,7 +219,7 @@ Expected: FAIL — async hoje não valida credenciais e o job não tem as propri
 
 - [ ] **Step 4: Validar + despachar com credenciais nos endpoints async**
 
-`app/Http/Controllers/Api/ConsultarProcessoController.php` (linhas ~211-221):
+`app/Http/Controllers/Api/ConsultarProcessoController.php`:
 
 ```php
     public function consultarDadosBasicosAsync(Request $request)
@@ -594,7 +245,7 @@ Expected: FAIL — async hoje não valida credenciais e o job não tem as propri
     }
 ```
 
-`app/Http/Controllers/Api/DocumentoController.php` (linhas ~180-184):
+`app/Http/Controllers/Api/DocumentoController.php`:
 
 ```php
     public function consultarDocumentosAsync(Request $request)
@@ -618,140 +269,225 @@ Expected: PASS.
 
 ```bash
 git add app/Jobs/ConsultarDadosBasicosProcessoMNIJob.php app/Jobs/ConsultarMovimentosProcessoMNIJob.php app/Jobs/ConsultarDocumentosProcessoMNIJob.php app/Http/Controllers/Api/ConsultarProcessoController.php app/Http/Controllers/Api/DocumentoController.php tests/Feature/Api/ConsultarProcessoControllerTest.php tests/Feature/Api/DocumentoControllerTest.php
-git commit -m "feat(mni): endpoints async threading credenciais pelo job (fix \$request indefinido)"
+git commit -m "feat(mni): endpoints async exigem credencial e threading pelo job"
 ```
 
 ---
 
-## Task 3: Remover o sweep de expediente (dependente de credencial armazenada)
+## Task 3: BaixarProcessoMNIJob recebe credencial do request + conserta bug do data_referencia
 
 **Files:**
-- Delete: `app/Services/MNI/Intercomunicacao/ConsultarExpedienteService.php`
-- Delete: `app/Console/Commands/MNIConsultarExpediente.php`
-- Test: `tests/Feature/ExpedienteRemovidoTest.php` (novo)
+- Modify: `app/Jobs/BaixarProcessoMNIJob.php`
+- Modify: `app/Http/Controllers/Api/ConsultarProcessoController.php` (dispatch em `show` e `buscarPorNumeroProcesso`)
+- Test: `tests/Feature/Api/ConsultarProcessoControllerTest.php`
 
 **Interfaces:**
-- Consumes: nada (o service era referenciado só pelo comando; o comando não é agendado).
-- Produces: as classes `App\Services\MNI\Intercomunicacao\ConsultarExpedienteService` e `App\Console\Commands\MNIConsultarExpediente` deixam de existir. `BaixarProcessoMNIJob` e o model `Expediente` permanecem.
+- Consumes: `ProcessoService::consultarDadosBasicos($tribunal, $numero, $login, $senha)`, `consultarMovimentos($tribunal, $numero, $login, $senha, $data_referencia)`, `consultarDocumentos($tribunal, $numero, $login, $senha, $data_referencia)`.
+- Produces: `BaixarProcessoMNIJob` construtor vira `($tribunal, $numero_processo, $login_pje = null, $senha_pje = null, $data_referencia = null)`, com propriedades públicas `login_pje`/`senha_pje`. Bug corrigido: hoje `handle()` passa `$this->data_referencia` no slot `$login`.
+
+**Nota:** o dispatch em `ConsultarExpedienteService.php:48` (`BaixarProcessoMNIJob::dispatch($tribunal, $expediente->processo->numero)`) NÃO muda — login/senha nulos → fallback do tribunal, correto para o contexto de background do expediente.
 
 - [ ] **Step 1: Escrever o teste que falha**
 
-Criar `tests/Feature/ExpedienteRemovidoTest.php`:
+Adicionar em `tests/Feature/Api/ConsultarProcessoControllerTest.php` (o import `use App\Jobs\BaixarProcessoMNIJob;` já existe):
 
 ```php
-<?php
+it('visualizar processo existente agenda refresh com as credenciais do payload', function () {
+    Queue::fake();
+    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
 
-it('não expõe mais o service nem o comando de expediente', function () {
-    expect(class_exists('App\\Services\\MNI\\Intercomunicacao\\ConsultarExpedienteService'))->toBeFalse();
-    expect(class_exists('App\\Console\\Commands\\MNIConsultarExpediente'))->toBeFalse();
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/visualizar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=u-pje&senha_pje=s-pje')
+        ->assertOk();
+
+    Queue::assertPushed(
+        BaixarProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'u-pje' && $job->senha_pje === 's-pje'
+    );
 });
 ```
 
 - [ ] **Step 2: Rodar e confirmar falha**
 
-Run: `docker compose exec php php artisan test tests/Feature/ExpedienteRemovidoTest.php`
-Expected: FAIL — as classes ainda existem.
+Run: `docker compose exec php php artisan test tests/Feature/Api/ConsultarProcessoControllerTest.php`
+Expected: FAIL — o job hoje não tem `login_pje`/`senha_pje` (propriedade inexistente → closure retorna false).
 
-- [ ] **Step 3: Deletar os arquivos**
+- [ ] **Step 3: Adicionar credenciais ao `BaixarProcessoMNIJob` + corrigir o bug**
 
-```bash
-git rm app/Services/MNI/Intercomunicacao/ConsultarExpedienteService.php app/Console/Commands/MNIConsultarExpediente.php
+`app/Jobs/BaixarProcessoMNIJob.php` — substituir propriedades + construtor + `handle`:
+
+```php
+    public $tribunal;
+    public $numero_processo;
+    public $login_pje;
+    public $senha_pje;
+    public $data_referencia;
+
+    /**
+     * Create a new job instance.
+     */
+    public function __construct(
+        $tribunal,
+        $numero_processo,
+        $login_pje = null,
+        $senha_pje = null,
+        $data_referencia = null
+    ) {
+        $this->tribunal = $tribunal;
+        $this->numero_processo = $numero_processo;
+        $this->login_pje = $login_pje;
+        $this->senha_pje = $senha_pje;
+        $this->data_referencia = $data_referencia;
+    }
+
+    /**
+     * Execute the job.
+     */
+    public function handle(): void
+    {
+        try {
+            $service = new ProcessoService();
+
+            $service->consultarDadosBasicos(
+                $this->tribunal,
+                $this->numero_processo,
+                $this->login_pje,
+                $this->senha_pje
+            );
+
+            $service->consultarMovimentos(
+                $this->tribunal,
+                $this->numero_processo,
+                $this->login_pje,
+                $this->senha_pje,
+                $this->data_referencia
+            );
+
+            $service->consultarDocumentos(
+                $this->tribunal,
+                $this->numero_processo,
+                $this->login_pje,
+                $this->senha_pje,
+                $this->data_referencia
+            );
+
+            //Dispara evento para webhook
+
+        } catch (MNIException $e) {
+            Log::error('BaixarProcessoMNIJob: ' . $this->numero_processo . ' - ' . $e->getError() . ' - Arquivo: ' . $e->getFile() . ' - Linha: ' . $e->getLine());
+        } catch (\Exception $e) {
+            Log::error('BaixarProcessoMNIJob: ' . $this->numero_processo . ' - ' . $e->getMessage() . ' - Arquivo: ' . $e->getFile() . ' - Linha: ' . $e->getLine());
+        }
+    }
 ```
 
-- [ ] **Step 4: Confirmar que não há referências pendentes**
+- [ ] **Step 4: Passar credenciais nos dispatches de `show` e `buscarPorNumeroProcesso`**
 
-Run: `grep -rnE 'ConsultarExpedienteService|MNIConsultarExpediente|mni:consultar-expedientes' app/`
-Expected: nenhuma ocorrência.
+`app/Http/Controllers/Api/ConsultarProcessoController.php`:
+- Em `show` (dispatch dentro do `else`, ~linha 105):
+
+```php
+                BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo, $request->login_pje, $request->senha_pje);
+```
+
+- Em `buscarPorNumeroProcesso` (dispatch dentro do `else`, ~linha 135):
+
+```php
+            BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo, $request->login_pje, $request->senha_pje);
+```
 
 - [ ] **Step 5: Rodar e confirmar que passa**
 
-Run: `docker compose exec php php artisan test tests/Feature/ExpedienteRemovidoTest.php`
-Expected: PASS.
+Run: `docker compose exec php php artisan test tests/Feature/Api/ConsultarProcessoControllerTest.php`
+Expected: PASS (incluindo os testes de `visualizar` que já asseguravam o push do job).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tests/Feature/ExpedienteRemovidoTest.php
-git commit -m "refactor(mni): remove sweep de expediente dependente de credencial armazenada"
+git add app/Jobs/BaixarProcessoMNIJob.php app/Http/Controllers/Api/ConsultarProcessoController.php tests/Feature/Api/ConsultarProcessoControllerTest.php
+git commit -m "fix(mni): BaixarProcessoMNIJob recebe credencial do request e corrige slot data_referencia"
 ```
 
 ---
 
-## Task 4: Dropar colunas login/password + limpar model, factory e CRUD backend
+## Task 4: Colunas login/password NULLABLE + CRUD deixa de gerenciar credencial
 
 **Files:**
-- Create: `database/migrations/XXXX_XX_XX_XXXXXX_drop_login_password_from_tribunais.php`
-- Modify: `app/Models/Tribunal.php:24-57`
-- Modify: `database/factories/TribunalFactory.php:17-28`
-- Modify: `app/Http/Requests/TribunalRequest.php:23-43`
-- Modify: `app/Http/Controllers/TribunalController.php:41-76`
+- Create: `database/migrations/XXXX_XX_XX_XXXXXX_make_login_password_nullable_on_tribunais.php`
+- Modify: `app/Models/Tribunal.php` (`$fillable` — remover creds; `$hidden` — MANTER creds)
+- Modify: `app/Http/Requests/TribunalRequest.php`, `app/Http/Controllers/TribunalController.php`
 - Test: `tests/Feature/TribunalCrudTest.php`
 
 **Interfaces:**
-- Consumes: conexão `sim`, tabela `tribunais`. Trait `Tests\SimDatabaseTestCase`.
-- Produces: colunas `login`/`password` inexistentes; `Tribunal::$fillable` sem `login`/`password`/`usar_credencial_tribunal`; CRUD web sem campos de credencial.
+- Produces: colunas `login`/`password` NULLABLE em `sim`. `Tribunal::$fillable` sem `login`/`password`/`usar_credencial_tribunal`. CRUD web não aceita nem exibe credencial.
+
+**Nota:** a `database/factories/TribunalFactory.php` NÃO muda (as colunas continuam existindo; o factory pode seguir setando `login`/`password`).
 
 - [ ] **Step 1: Gerar o arquivo de migration**
 
-Run: `docker compose exec php php artisan make:migration drop_login_password_from_tribunais`
-Expected: cria `database/migrations/AAAA_MM_DD_HHMMSS_drop_login_password_from_tribunais.php`.
+Run: `docker compose exec php php artisan make:migration make_login_password_nullable_on_tribunais`
+Expected: cria `database/migrations/AAAA_MM_DD_HHMMSS_make_login_password_nullable_on_tribunais.php`.
 
 - [ ] **Step 2: Escrever o conteúdo da migration**
 
-Substituir o conteúdo do arquivo gerado por:
+Substituir o conteúdo por (raw `DROP NOT NULL` — preserva os tipos: `login` varchar(255), `password` text):
 
 ```php
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        Schema::connection('sim')->table('tribunais', function (Blueprint $table) {
-            $table->dropColumn(['login', 'password']);
-        });
+        DB::connection('sim')->statement('ALTER TABLE tribunais ALTER COLUMN login DROP NOT NULL');
+        DB::connection('sim')->statement('ALTER TABLE tribunais ALTER COLUMN password DROP NOT NULL');
     }
 
     public function down(): void
     {
-        Schema::connection('sim')->table('tribunais', function (Blueprint $table) {
-            $table->string('login')->nullable();
-            $table->string('password')->nullable();
-        });
+        DB::connection('sim')->statement('ALTER TABLE tribunais ALTER COLUMN login SET NOT NULL');
+        DB::connection('sim')->statement('ALTER TABLE tribunais ALTER COLUMN password SET NOT NULL');
     }
 };
 ```
 
-- [ ] **Step 3: Escrever o teste que falha (colunas ausentes + factory sem credencial)**
+- [ ] **Step 3: Escrever o teste que falha (criar tribunal sem credencial)**
 
 Adicionar no topo de `tests/Feature/TribunalCrudTest.php` o import `use Illuminate\Support\Facades\Schema;` e este teste:
 
 ```php
-it('não tem mais as colunas login e password na tabela tribunais', function () {
-    expect(Schema::connection('sim')->hasColumn('tribunais', 'login'))->toBeFalse();
-    expect(Schema::connection('sim')->hasColumn('tribunais', 'password'))->toBeFalse();
+it('cria tribunal sem credenciais (colunas nullable)', function () {
+    $this->actingAs(autenticado())
+        ->post('/tribunais', tribunalPayload(['nome' => 'Tribunal Sem Credencial']))
+        ->assertRedirect(route('tribunais.index'));
+
+    $tribunal = Tribunal::where('nome', 'Tribunal Sem Credencial')->first();
+    expect($tribunal)->not->toBeNull();
+    expect($tribunal->login)->toBeNull();
+    expect($tribunal->password)->toBeNull();
 });
 ```
+
+(Este teste só passa depois de (a) a migration tornar as colunas nullable e (b) `tribunalPayload` parar de enviar credenciais — Steps 5 e 8.)
 
 - [ ] **Step 4: Rodar e confirmar falha**
 
 Run: `docker compose exec php php artisan test tests/Feature/TribunalCrudTest.php`
-Expected: FAIL — as colunas ainda existem (migration não rodada).
+Expected: FAIL — `tribunalPayload` ainda envia login/password (não nulos) e/ou colunas ainda NOT NULL.
 
 - [ ] **Step 5: Rodar SOMENTE esta migration na conexão sim**
 
-⚠️ Usar `--path` para não disparar a migration não-rastreada `seed_admin_user`. Substituir `AAAA_MM_DD_HHMMSS` pelo timestamp real do arquivo gerado no Step 1.
+⚠️ `--path` para não disparar a migration não-rastreada `seed_admin_user`. Substituir `AAAA_MM_DD_HHMMSS` pelo timestamp real.
 
-Run: `docker compose exec php php artisan migrate --path=database/migrations/AAAA_MM_DD_HHMMSS_drop_login_password_from_tribunais.php --force`
-Expected: `INFO Running migrations. ... drop_login_password_from_tribunais DONE`.
+Run: `docker compose exec php php artisan migrate --path=database/migrations/AAAA_MM_DD_HHMMSS_make_login_password_nullable_on_tribunais.php --force`
+Expected: `... make_login_password_nullable_on_tribunais DONE`.
 
-- [ ] **Step 6: Limpar o model `Tribunal`**
+- [ ] **Step 6: Limpar o `$fillable` do model (mantendo `$hidden`)**
 
-Em `app/Models/Tribunal.php`, `$fillable` (remover `login`, `password`, `usar_credencial_tribunal`):
+Em `app/Models/Tribunal.php`, `$fillable` — remover `login`, `password`, `usar_credencial_tribunal`:
 
 ```php
     protected $fillable = [
@@ -774,45 +510,11 @@ Em `app/Models/Tribunal.php`, `$fillable` (remover `login`, `password`, `usar_cr
     ];
 ```
 
-E `$hidden` (remover `login`, `password`):
+**NÃO alterar `$hidden`** — ele MANTÉM `login` e `password` (as colunas existem e são sensíveis).
 
-```php
-    protected $hidden = [
-        // 'id',
-        'url_webservice_mni',
-        'url_webservice_mni_complementar',
-        'url_consulta_pje',
-        'url_recuperar_senha_tribunal',
-        'created_at',
-        'updated_at',
-        'deleted_at'
-    ];
-```
+- [ ] **Step 7: Limpar o `TribunalRequest`**
 
-(`boot()`/uuid guard e `getTipos()` ficam intactos.)
-
-- [ ] **Step 7: Limpar a factory**
-
-Em `database/factories/TribunalFactory.php`, `definition()` (remover `login`, `password`, `usar_credencial_tribunal`):
-
-```php
-    public function definition(): array
-    {
-        return [
-            'nome' => 'Tribunal ' . fake()->unique()->company(),
-            'tipo' => null,
-            'url_webservice_mni' => fake()->url(),
-            'url_webservice_mni_complementar' => fake()->url(),
-            'ativo' => true,
-            'enviar_dados_criminais' => false,
-            'versao_mni' => '2.2.2',
-        ];
-    }
-```
-
-- [ ] **Step 8: Limpar o `TribunalRequest`**
-
-Em `app/Http/Requests/TribunalRequest.php`, remover as 3 regras `login`, `password`, `usar_credencial_tribunal`. O array `rules()` fica:
+Em `app/Http/Requests/TribunalRequest.php`, remover as regras `login`, `password`, `usar_credencial_tribunal` e a linha `$criando = $this->isMethod('POST');` (fica sem uso). `rules()` retorna:
 
 ```php
         return [
@@ -835,11 +537,9 @@ Em `app/Http/Requests/TribunalRequest.php`, remover as 3 regras `login`, `passwo
         ];
 ```
 
-(A variável `$criando = $this->isMethod('POST');` fica sem uso — remover a linha também.)
+- [ ] **Step 8: Limpar o `TribunalController`**
 
-- [ ] **Step 9: Limpar o `TribunalController`**
-
-Em `app/Http/Controllers/TribunalController.php`, método `edit` — remover `'login'` e `'usar_credencial_tribunal'` do `only([...])`:
+Em `app/Http/Controllers/TribunalController.php`, `edit` — remover `'login'` e `'usar_credencial_tribunal'` do `only([...])`:
 
 ```php
     public function edit(Tribunal $tribunal): Response
@@ -869,7 +569,7 @@ Em `app/Http/Controllers/TribunalController.php`, método `edit` — remover `'l
     }
 ```
 
-E método `update` — remover o bloco que dropava a password em branco:
+E `update` — remover o bloco que dropava a password em branco:
 
 ```php
     public function update(TribunalRequest $request, Tribunal $tribunal): RedirectResponse
@@ -880,7 +580,7 @@ E método `update` — remover o bloco que dropava a password em branco:
     }
 ```
 
-- [ ] **Step 10: Atualizar os testes obsoletos do CRUD**
+- [ ] **Step 9: Atualizar os testes obsoletos do CRUD**
 
 Em `tests/Feature/TribunalCrudTest.php`:
 
@@ -910,20 +610,20 @@ it('valida campos obrigatórios no store', function () {
 });
 ```
 
-**Deletar** por completo o teste `it('mantém a password quando enviada em branco no update', ...)` (não faz mais sentido — coluna dropada).
+**Deletar** por completo o teste `it('mantém a password quando enviada em branco no update', ...)`.
 
-O teste `it('renderiza o formulário de edição sem a password', ...)` permanece válido (o `only()` já não inclui password → `missing('tribunal.password')` continua verdadeiro).
+O teste `it('renderiza o formulário de edição sem a password', ...)` permanece válido (o `only()` não inclui password → `missing('tribunal.password')` continua verdadeiro).
 
-- [ ] **Step 11: Rodar e confirmar que passam**
+- [ ] **Step 10: Rodar e confirmar que passam**
 
 Run: `docker compose exec php php artisan test tests/Feature/TribunalCrudTest.php`
-Expected: PASS (incluindo o teste de colunas ausentes).
+Expected: PASS.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add database/migrations/*_drop_login_password_from_tribunais.php app/Models/Tribunal.php database/factories/TribunalFactory.php app/Http/Requests/TribunalRequest.php app/Http/Controllers/TribunalController.php tests/Feature/TribunalCrudTest.php
-git commit -m "feat(tribunais): dropa colunas login/password e remove credencial do CRUD"
+git add database/migrations/*_make_login_password_nullable_on_tribunais.php app/Models/Tribunal.php app/Http/Requests/TribunalRequest.php app/Http/Controllers/TribunalController.php tests/Feature/TribunalCrudTest.php
+git commit -m "feat(tribunais): colunas login/password nullable e CRUD deixa de gerenciar credencial"
 ```
 
 ---
@@ -931,10 +631,9 @@ git commit -m "feat(tribunais): dropa colunas login/password e remove credencial
 ## Task 5: Remover a seção Credenciais do formulário de tribunal
 
 **Files:**
-- Modify: `resources/js/components/tribunal-form.tsx:20-40`, `:58-78`, `:166-203`
+- Modify: `resources/js/components/tribunal-form.tsx`
 
 **Interfaces:**
-- Consumes: props `tipos: string[]`, `tribunal?: TribunalFormValues`.
 - Produces: `TribunalFormValues` sem `login`/`usar_credencial_tribunal`; `useForm` sem `login`/`password`/`usar_credencial_tribunal`; sem a `<Secao titulo="Credenciais">`.
 
 - [ ] **Step 1: Remover os campos de credencial do tipo `TribunalFormValues`**
@@ -990,12 +689,12 @@ Remover as linhas `login`, `password` e `usar_credencial_tribunal` do objeto do 
 
 - [ ] **Step 3: Remover a `<Secao titulo="Credenciais">` inteira**
 
-Remover o bloco JSX completo que começa em `<Secao titulo="Credenciais">` e termina no `</Secao>` correspondente (login, password e o checkbox `usar_credencial_tribunal`). As seções "Identificação", "URLs MNI", "Códigos" e "Flags" permanecem.
+Remover o bloco JSX completo de `<Secao titulo="Credenciais">` até o `</Secao>` correspondente (login, password e o checkbox `usar_credencial_tribunal`). As seções "Identificação", "URLs MNI", "Códigos" e "Flags" permanecem.
 
 - [ ] **Step 4: Rodar typecheck**
 
 Run: `npm run typecheck`
-Expected: sem erros (nenhuma referência remanescente a `login`/`password`/`usar_credencial_tribunal`).
+Expected: sem erros.
 
 - [ ] **Step 5: Rodar build**
 
@@ -1014,7 +713,7 @@ git commit -m "feat(tribunais): remove seção Credenciais do formulário"
 ## Verificação final (após todas as tasks)
 
 - [ ] **Suíte completa:** `docker compose exec php php artisan test`
-  Expected: as 8 falhas pré-existentes de exportação permanecem; NENHUMA falha nova. Todos os testes de API, expediente e CRUD verdes.
-- [ ] **Grep de credencial armazenada:** `grep -rnE '\$tribunal->login|\$tribunal->password' app/`
-  Expected: nenhuma ocorrência.
+  Expected: as 8 falhas pré-existentes de exportação permanecem; NENHUMA falha nova.
+- [ ] **Fallback preservado:** `grep -rnE '\?\? \$tribunal->login' app/Services/` → deve continuar existindo (ConsultarProcessoService, ConsultarDocumentoService).
+- [ ] **Colunas nullable:** introspecção confirma `login`/`password` com `is_nullable=YES` em `sim`.
 - [ ] **Frontend:** `npm run typecheck && npm run build` verdes.
