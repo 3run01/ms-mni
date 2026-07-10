@@ -79,6 +79,14 @@ it('rejeita URL inválida', function () {
         ->assertInvalid(['url_webservice_mni']);
 });
 
+it('rejeita URL acima de 255 caracteres', function () {
+    $urlLonga = 'https://tribunal.test/' . str_repeat('a', 250);
+
+    $this->actingAs(autenticado())
+        ->post('/tribunais', tribunalPayload(['url_webservice_mni' => $urlLonga]))
+        ->assertInvalid(['url_webservice_mni']);
+});
+
 it('renderiza o formulário de edição sem a password', function () {
     $tribunal = Tribunal::factory()->create();
 
