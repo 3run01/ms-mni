@@ -14,7 +14,7 @@ Escopo desta iteração: **somente leitura**. Sem download de documentos, sem re
 - Stack: Laravel + Inertia v2 + React + shadcn/ui. Padrão de referência: CRUD de tribunais (`TribunalController`, `resources/js/pages/tribunais/*`).
 - Tabela `processos` tem **24.489 linhas** no banco local → paginação server-side obrigatória.
 - Status reais no banco: `Peticionado` (24.125) e `Arquivado` (364). O model define 4 constantes: `Pendente de envio`, `Processando envio`, `Peticionado`, `Arquivado`. `Arquivado` existe no banco mas está fora de `Processo::getStatus()` — o filtro da tela deve incluir os 4.
-- Model `Processo` tem `$with` default (tribunal, prioridades, classe, assuntos) e `$hidden` (id, payload_envio, etc.). Atenção: `id` está em `$hidden` — a listagem/detalhe expõe `id` via `makeVisible('id')` no controller (não alterar o `$hidden` do model, usado pela API existente).
+- Model `Processo` tem `$with` default (tribunal, prioridades, classe, assuntos) e `$hidden` (id, payload_envio, etc.). Atenção: `id` está em `$hidden` — a listagem/detalhe expõe `id` montando arrays explícitos no controller (`through`/`map`), sem alterar o `$hidden` do model (usado pela API existente).
 - Campo `unidade_id` está em `$fillable` mas **não existe** na tabela — não usar.
 - Relação `tribunal()` do model filtra `ativo = true` — processo de tribunal inativo renderiza tribunal como nulo; tratar com "—".
 
@@ -77,7 +77,7 @@ Layout `AppLayout` + breadcrumb "Processos", padrão visual das telas de tribuna
 
 **Tabela** (shadcn `Table`):
 
-- Colunas: Número do processo, Tribunal (sigla), Classe, Status (Badge: verde Peticionado, amarelo Processando envio, vermelho Pendente de envio, cinza Arquivado), Valor da causa (R$ formatado), Criado em (data local)
+- Colunas: Número do processo, Tribunal (nome — tabela não tem sigla), Classe, Status (Badge: verde Peticionado, amarelo Processando envio, vermelho Pendente de envio, cinza Arquivado), Valor da causa (R$ formatado), Criado em (data local)
 - Linha inteira clicável → `processos.show`
 - Estado vazio: mensagem + hint para limpar filtros
 
