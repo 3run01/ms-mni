@@ -189,7 +189,12 @@ class DocumentoController extends Controller
 
     public function consultarDocumentosAsync(Request $request)
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        ConsultarDocumentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
+        ConsultarDocumentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo, $request->login_pje, $request->senha_pje)->onQueue('alta');
     }
 }

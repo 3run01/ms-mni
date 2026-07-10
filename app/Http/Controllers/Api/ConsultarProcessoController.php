@@ -220,14 +220,24 @@ class ConsultarProcessoController extends Controller
 
     public function consultarDadosBasicosAsync(Request $request)
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        ConsultarDadosBasicosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
+        ConsultarDadosBasicosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo, $request->login_pje, $request->senha_pje)->onQueue('alta');
     }
 
     public function consultarMovimentosAsync(Request $request)
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        ConsultarMovimentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
+        ConsultarMovimentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo, $request->login_pje, $request->senha_pje)->onQueue('alta');
     }
 
 }
