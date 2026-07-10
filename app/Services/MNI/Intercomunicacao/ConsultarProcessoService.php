@@ -5,8 +5,6 @@ namespace App\Services\MNI\Intercomunicacao;
 use App\Exceptions\MNIException;
 use App\Models\Tribunal;
 use App\Services\IntegracaoBase;
-use Illuminate\Contracts\Encryption\DecryptException;
-use Illuminate\Support\Facades\Crypt;
 
 class ConsultarProcessoService
 {
@@ -28,8 +26,8 @@ class ConsultarProcessoService
 
         try {
             $params = [
-                'idConsultante' => $login_pje ?? $tribunal->login,
-                'senhaConsultante' => $senha_pje ?? Crypt::decrypt($tribunal->password),
+                'idConsultante' => $login_pje,
+                'senhaConsultante' => $senha_pje,
                 'numeroProcesso'  => $numero_processo,
                 'dataReferencia' => $data_referencia,
                 'incluirCabecalho'  => $incluir_cabecalho,
@@ -46,8 +44,6 @@ class ConsultarProcessoService
             } else {
                 throw new MNIException($retorno->mensagem, 500);
             }
-        } catch (DecryptException $e) {
-            throw new MNIException('Credenciais MNI/PJ-e tribunal inválidas.', 422);
         } catch (MNIException $e) {
             throw new MNIException($e->getError(), 500);
         } catch (\Exception $e) {

@@ -5,7 +5,6 @@ namespace App\Services\MNI\Intercomunicacao;
 use App\Exceptions\MNIException;
 use App\Models\Tribunal;
 use App\Services\IntegracaoBase;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Str;
 
 class ConsultarDocumentoService
@@ -21,8 +20,8 @@ class ConsultarDocumentoService
         try {
             $integracao = new IntegracaoBase($tribunal->url_webservice_mni);
             $parametros = [
-                'idConsultante' => $login_pje ?? $tribunal->login,
-                'senhaConsultante' => $senha_pje ?? Crypt::decrypt($tribunal->password),
+                'idConsultante' => $login_pje,
+                'senhaConsultante' => $senha_pje,
                 'numeroProcesso' => $numero_processo,
                 'incluirCabecalho' => false,
                 'incluirMovimentos' => false,
