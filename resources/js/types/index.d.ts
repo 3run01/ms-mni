@@ -19,9 +19,18 @@ export interface NavItem {
     external?: boolean;
 }
 
+export interface TribunalListItem {
+    id: number;
+    nome: string;
+    tipo: string | null;
+    versao_mni: string | null;
+    ativo: boolean | null;
+}
+
 export interface SharedProps {
     app: { name: string };
     auth: { user: User | null };
     sidebarOpen: boolean;
+    flash: { success: string | null };
     [key: string]: unknown;
 }
