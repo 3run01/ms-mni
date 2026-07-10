@@ -9,6 +9,7 @@ use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 
@@ -327,8 +328,19 @@ class SalvarDocumentoProcessoService
                 throw new \Exception('Documento não possui processo associado');
             }
 
+            // Se login e senha não forem informados, usar as credenciais do tribunal
             if (empty($login_pje) || empty($senha_pje)) {
-                throw new \Exception('Credenciais MNI/PJ-e obrigatórias para baixar o documento');
+                $tribunal = $documento->processo->tribunal;
+                if (!$tribunal) {
+                    throw new \Exception('Processo não possui tribunal associado');
+                }
+
+                $login_pje = $tribunal->login;
+                $senha_pje = Crypt::decrypt($tribunal->password);
+
+                if (empty($login_pje) || empty($senha_pje)) {
+                    throw new \Exception('Tribunal não possui credenciais de acesso configuradas');
+                }
             }
 
             $numeroProcesso = $documento->processo->numero_processo;
@@ -457,8 +469,19 @@ class SalvarDocumentoProcessoService
                 throw new \Exception('Documento não possui processo associado');
             }
 
+            // Se login e senha não forem informados, usar as credenciais do tribunal
             if (empty($login_pje) || empty($senha_pje)) {
-                throw new \Exception('Credenciais MNI/PJ-e obrigatórias para baixar o documento');
+                $tribunal = $documento->processo->tribunal;
+                if (!$tribunal) {
+                    throw new \Exception('Processo não possui tribunal associado');
+                }
+
+                $login_pje = $tribunal->login;
+                $senha_pje = Crypt::decrypt($tribunal->password);
+
+                if (empty($login_pje) || empty($senha_pje)) {
+                    throw new \Exception('Tribunal não possui credenciais de acesso configuradas');
+                }
             }
 
             $numeroProcesso = $documento->processo->numero_processo;
