@@ -44,8 +44,6 @@ class TribunalController extends Controller
                 'tipo',
                 'versao_mni',
                 'ativo',
-                'login',
-                'usar_credencial_tribunal',
                 'url_webservice_mni',
                 'url_webservice_mni_consultar_processo',
                 'url_webservice_mni_complementar',
@@ -64,13 +62,7 @@ class TribunalController extends Controller
 
     public function update(TribunalRequest $request, Tribunal $tribunal): RedirectResponse
     {
-        $dados = $request->validated();
-
-        if (blank($dados['password'] ?? null)) {
-            unset($dados['password']);
-        }
-
-        $tribunal->update($dados);
+        $tribunal->update($request->validated());
 
         return redirect()->route('tribunais.index')->with('success', 'Tribunal atualizado.');
     }

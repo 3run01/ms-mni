@@ -23,8 +23,6 @@ class Tribunal extends Model
     protected $table = 'tribunais';
     protected $fillable = [
         'nome',
-        'login',
-        'password',
         'url_webservice_mni',
         'url_webservice_mni_consultar_processo',
         'url_webservice_mni_complementar',
@@ -39,7 +37,6 @@ class Tribunal extends Model
         'codigo_seeu',
         'usar_codigo_documento_padrao',
         'enviar_dados_criminais',
-        'usar_credencial_tribunal',
         'versao_mni',
     ];
 

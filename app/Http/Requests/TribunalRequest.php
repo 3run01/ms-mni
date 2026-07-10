@@ -18,13 +18,9 @@ class TribunalRequest extends FormRequest
      */
     public function rules(): array
     {
-        $criando = $this->isMethod('POST');
-
         return [
             'nome' => ['required', 'string', 'max:255'],
             'tipo' => ['nullable', 'string', Rule::in(Tribunal::getTipos())],
-            'login' => ['required', 'string', 'max:255'],
-            'password' => [$criando ? 'required' : 'nullable', 'string'],
             'url_webservice_mni' => ['required', 'url', 'max:255'],
             'url_webservice_mni_complementar' => ['required', 'url', 'max:255'],
             'url_webservice_mni_consultar_processo' => ['nullable', 'url', 'max:255'],
@@ -39,7 +35,6 @@ class TribunalRequest extends FormRequest
             'versao_mni' => ['nullable', 'string', 'max:50'],
             'ativo' => ['required', 'boolean'],
             'enviar_dados_criminais' => ['boolean'],
-            'usar_credencial_tribunal' => ['boolean'],
         ];
     }
 }

@@ -2,6 +2,7 @@
 
 use App\Models\Tribunal;
 use App\Models\User;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\SimDatabaseTestCase;
 
@@ -12,13 +13,10 @@ function tribunalPayload(array $overrides = []): array
     return array_merge([
         'nome' => 'Tribunal de Teste E2E',
         'tipo' => Tribunal::TIPO_STJ,
-        'login' => 'usuario.mni',
-        'password' => 'senha-secreta',
         'url_webservice_mni' => 'https://tribunal.test/mni',
         'url_webservice_mni_complementar' => 'https://tribunal.test/mni-complementar',
         'ativo' => true,
         'enviar_dados_criminais' => false,
-        'usar_credencial_tribunal' => false,
     ], $overrides);
 }
 
@@ -61,10 +59,21 @@ it('cria tribunal e redireciona com flash', function () {
     expect(Tribunal::where('nome', 'Tribunal de Teste E2E')->exists())->toBeTrue();
 });
 
+it('cria tribunal sem credenciais (colunas nullable)', function () {
+    $this->actingAs(autenticado())
+        ->post('/tribunais', tribunalPayload(['nome' => 'Tribunal Sem Credencial']))
+        ->assertRedirect(route('tribunais.index'));
+
+    $tribunal = Tribunal::where('nome', 'Tribunal Sem Credencial')->first();
+    expect($tribunal)->not->toBeNull();
+    expect($tribunal->login)->toBeNull();
+    expect($tribunal->password)->toBeNull();
+});
+
 it('valida campos obrigatórios no store', function () {
     $this->actingAs(autenticado())
         ->post('/tribunais', [])
-        ->assertInvalid(['nome', 'login', 'password', 'url_webservice_mni', 'url_webservice_mni_complementar']);
+        ->assertInvalid(['nome', 'url_webservice_mni', 'url_webservice_mni_complementar']);
 });
 
 it('rejeita tipo fora da lista', function () {
@@ -107,16 +116,6 @@ it('atualiza tribunal', function () {
         ->assertRedirect(route('tribunais.index'));
 
     expect($tribunal->fresh()->nome)->toBe('Nome Atualizado');
-});
-
-it('mantém a password quando enviada em branco no update', function () {
-    $tribunal = Tribunal::factory()->create(['password' => 'senha-original']);
-
-    $this->actingAs(autenticado())
-        ->put("/tribunais/{$tribunal->id}", tribunalPayload(['password' => '']))
-        ->assertRedirect(route('tribunais.index'));
-
-    expect($tribunal->fresh()->password)->toBe('senha-original');
 });
 
 it('inverte o ativo no toggle', function () {
