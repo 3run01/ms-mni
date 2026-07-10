@@ -52,14 +52,17 @@ Import: `App\Http\Controllers\TribunalController` (novo — o `Api\TribunalContr
 
 ### FormRequest `app/Http/Requests/TribunalRequest.php` (store + update)
 
+Regras derivadas do schema REAL da tabela (introspecção em 2026-07-10; colunas NOT NULL viram required; `tipo` é nullable no banco e 6 dos 8 registros existentes têm NULL — `required` quebraria a edição deles):
+
 - `nome`: `required|string|max:255`
-- `tipo`: `required|string|in:` (valores de `Tribunal::getTipos()`)
-- `login`: `nullable|string|max:255`
-- `password`: `required|string` no store; `nullable|string` no update (detecta via método HTTP/rota)
-- URLs (`url_webservice_mni`, `url_webservice_mni_consultar_processo`, `url_webservice_mni_complementar`, `url_consulta_pje`, `url_webservice_mni_criminal`, `url_recuperar_senha_tribunal`): `nullable|url|max:2048`
-- Códigos (`codigo_peticao_inicial`, `codigo_peticao_avulsa`, `codigo_certidao_inicio_fim`, `codigo_seeu`): `nullable|integer`
+- `tipo`: `nullable|string|in:` (valores de `Tribunal::getTipos()`)
+- `login`: `required|string|max:255` (NOT NULL no banco)
+- `password`: `required|string` no store; `nullable|string` no update (coluna NOT NULL; vazio no update = mantém atual)
+- `url_webservice_mni`, `url_webservice_mni_complementar`: `required|url|max:2048` (NOT NULL no banco)
+- Demais URLs (`url_webservice_mni_consultar_processo`, `url_consulta_pje`, `url_webservice_mni_criminal`, `url_recuperar_senha_tribunal`): `nullable|url|max:2048`
+- Códigos (`codigo_peticao_inicial`, `codigo_peticao_avulsa`, `codigo_certidao_inicio_fim`, `codigo_seeu`) e `usar_codigo_documento_padrao`: `nullable|string|max:255` — **todas varchar no banco** (a spec original supôs integer/boolean; o schema manda)
 - `versao_mni`: `nullable|string|max:50`
-- Booleans (`ativo`, `enviar_dados_criminais`, `usar_credencial_tribunal`, `usar_codigo_documento_padrao`): `boolean`
+- Booleans (`ativo`, `enviar_dados_criminais`, `usar_credencial_tribunal`): `boolean`
 
 ### Model (melhoria direcionada)
 
@@ -95,11 +98,11 @@ Import: `App\Http\Controllers\TribunalController` (novo — o `Api\TribunalContr
 
 `useForm` + seções com heading:
 
-1. **Identificação**: nome (Input), tipo (Select com `tipos`), versao_mni (Input), ativo (Checkbox)
+1. **Identificação**: nome (Input), tipo (Select com `tipos` + opção "Nenhum" → null), versao_mni (Input), ativo (Checkbox)
 2. **Credenciais**: login (Input), password (Input type=password, autocomplete="new-password"; no edit, placeholder/hint "Preencha somente para trocar a senha"), usar_credencial_tribunal (Checkbox)
 3. **URLs MNI**: os 6 campos url (Input type=url)
-4. **Códigos**: os 4 campos (Input type=number)
-5. **Flags**: enviar_dados_criminais, usar_codigo_documento_padrao (Checkbox)
+4. **Códigos**: codigo_peticao_inicial, codigo_peticao_avulsa, codigo_certidao_inicio_fim, codigo_seeu, usar_codigo_documento_padrao (Input text — colunas varchar)
+5. **Flags**: enviar_dados_criminais (Checkbox)
 
 `InputError` por campo; submit com spinner (`processing`), botão "Salvar"; link "Cancelar" de volta pra index.
 
