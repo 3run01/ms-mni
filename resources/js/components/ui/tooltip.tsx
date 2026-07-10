@@ -16,6 +16,9 @@ function TooltipProvider({
   )
 }
 
+// Diverge do kit de propósito: radix-tooltip 1.2+ (via meta-package radix-ui)
+// exige Provider; embutir aqui segue o registry shadcn atual. Não remover ao
+// re-sincronizar com o starter kit.
 function Tooltip({
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Root>) {

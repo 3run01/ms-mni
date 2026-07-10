@@ -38,6 +38,7 @@ export default function Login() {
                             placeholder="email@exemplo.com"
                             value={data.email}
                             onChange={(e) => setData('email', e.target.value)}
+                            aria-invalid={!!errors.email}
                         />
                         <InputError message={errors.email} />
                     </div>
@@ -52,6 +53,7 @@ export default function Login() {
                             placeholder="Senha"
                             value={data.password}
                             onChange={(e) => setData('password', e.target.value)}
+                            aria-invalid={!!errors.password}
                         />
                         <InputError message={errors.password} />
                     </div>
