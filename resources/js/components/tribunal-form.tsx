@@ -23,8 +23,6 @@ export interface TribunalFormValues {
     tipo: string | null;
     versao_mni: string | null;
     ativo: boolean | null;
-    login: string;
-    usar_credencial_tribunal: boolean | null;
     url_webservice_mni: string;
     url_webservice_mni_consultar_processo: string | null;
     url_webservice_mni_complementar: string;
@@ -60,9 +58,6 @@ export default function TribunalForm({
         tipo: tribunal?.tipo ?? null,
         versao_mni: tribunal?.versao_mni ?? '',
         ativo: Boolean(tribunal?.ativo ?? true),
-        login: tribunal?.login ?? '',
-        password: '',
-        usar_credencial_tribunal: Boolean(tribunal?.usar_credencial_tribunal ?? false),
         url_webservice_mni: tribunal?.url_webservice_mni ?? '',
         url_webservice_mni_consultar_processo: tribunal?.url_webservice_mni_consultar_processo ?? '',
         url_webservice_mni_complementar: tribunal?.url_webservice_mni_complementar ?? '',
@@ -159,45 +154,6 @@ export default function TribunalForm({
                     />
                     <Label htmlFor="ativo" className="font-normal">
                         Ativo
-                    </Label>
-                </div>
-            </Secao>
-
-            <Secao titulo="Credenciais">
-                <div className="space-y-2">
-                    <Label htmlFor="login">Login *</Label>
-                    <Input
-                        id="login"
-                        value={data.login}
-                        onChange={(e) => setData('login', e.target.value)}
-                        autoComplete="off"
-                        aria-invalid={!!errors.login}
-                    />
-                    <InputError message={errors.login} />
-                </div>
-
-                <div className="space-y-2">
-                    <Label htmlFor="password">{tribunal ? 'Senha' : 'Senha *'}</Label>
-                    <Input
-                        id="password"
-                        type="password"
-                        value={data.password}
-                        onChange={(e) => setData('password', e.target.value)}
-                        autoComplete="new-password"
-                        placeholder={tribunal ? 'Preencha somente para trocar a senha' : undefined}
-                        aria-invalid={!!errors.password}
-                    />
-                    <InputError message={errors.password} />
-                </div>
-
-                <div className="flex items-center gap-2 md:col-span-2">
-                    <Checkbox
-                        id="usar_credencial_tribunal"
-                        checked={data.usar_credencial_tribunal}
-                        onCheckedChange={(checked) => setData('usar_credencial_tribunal', checked === true)}
-                    />
-                    <Label htmlFor="usar_credencial_tribunal" className="font-normal">
-                        Usar credencial do tribunal
                     </Label>
                 </div>
             </Secao>
