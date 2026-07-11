@@ -27,10 +27,19 @@ export interface TribunalListItem {
     ativo: boolean | null;
 }
 
+export interface ApiTokenListItem {
+    id: number;
+    name: string;
+    ativo: boolean;
+    expires_at: string | null;
+    last_used_at: string | null;
+    created_at: string;
+}
+
 export interface SharedProps {
     app: { name: string };
     auth: { user: User | null };
     sidebarOpen: boolean;
-    flash: { success: string | null };
+    flash: { success: string | null; token: string | null };
     [key: string]: unknown;
 }
