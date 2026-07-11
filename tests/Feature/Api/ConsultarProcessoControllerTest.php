@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Queue;
 uses(DatabaseTransactions::class);
 
 beforeEach(function () {
-    config()->set('services.api.token', 'tk-test');
+    criarTokenApi();
 });
 
 function criarProcessoParaConsulta(string $numero, int $tribunalId = 1): Processo

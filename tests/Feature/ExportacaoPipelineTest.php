@@ -14,7 +14,7 @@ it('pipeline: POST /api/processo/download → PDF → S3 → webhook', function 
     Storage::fake('public');
     Http::fake(['*' => Http::response(['message' => 'OK', 'download_id' => 1], 200)]);
 
-    config()->set('services.api.token', 'tk-test');
+    criarTokenApi();
     config()->set('services.sim_webhook_download.url', 'https://sim.test/webhook/download');
     config()->set('services.sim_webhook_download.token', 'tk-test');
     config()->set('queue.default', 'sync');

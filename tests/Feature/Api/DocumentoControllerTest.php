@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Queue;
 uses(DatabaseTransactions::class);
 
 beforeEach(function () {
-    config()->set('services.api.token', 'tk-test');
+    criarTokenApi();
 });
 
 it('documento visualizar sem credenciais retorna 422', function () {
