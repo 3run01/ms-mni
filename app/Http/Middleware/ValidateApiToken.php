@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\ApiToken;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,13 +16,17 @@ class ValidateApiToken
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $token = $request->header('X-API-Token');
+        $plainToken = $request->header('X-API-Token');
 
-        if (!$token || $token !== config('services.api.token')) {
+        $apiToken = $plainToken ? ApiToken::findValid($plainToken) : null;
+
+        if (! $apiToken) {
             return response()->json([
-                'message' => 'Token inválido ou não fornecido'
+                'message' => 'Token inválido ou não fornecido',
             ], 401);
         }
+
+        $apiToken->registrarUso();
 
         return $next($request);
     }
