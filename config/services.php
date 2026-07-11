@@ -35,10 +35,6 @@ return [
         ],
     ],
 
-    'api' => [
-        'token' => env('API_TOKEN'),
-    ],
-
     'sim_webhook_download' => [
         'url' => rtrim(env('SIM_APP_URL', ''), '/') . '/webhook/download',
         'token' => env('MS_MNI_API_TOKEN'),
