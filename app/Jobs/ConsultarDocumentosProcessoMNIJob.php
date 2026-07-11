@@ -33,7 +33,7 @@ class ConsultarDocumentosProcessoMNIJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $processoService = new ProcessoService();
+        $processoService = app(ProcessoService::class);
         $processo = $processoService->consultarDocumentos(
             Tribunal::find($this->tribunal_id),
             $this->numero_processo,

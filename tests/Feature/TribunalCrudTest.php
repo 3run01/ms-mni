@@ -2,7 +2,6 @@
 
 use App\Models\Tribunal;
 use App\Models\User;
-use Illuminate\Support\Facades\Schema;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\SimDatabaseTestCase;
 
