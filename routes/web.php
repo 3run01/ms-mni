@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ApiTokenController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\TribunalController;
 use Illuminate\Support\Facades\Route;
@@ -28,4 +29,10 @@ Route::middleware('auth:web')->group(function () {
     Route::get('/tribunais/{tribunal}/editar', [TribunalController::class, 'edit'])->name('tribunais.edit');
     Route::put('/tribunais/{tribunal}', [TribunalController::class, 'update'])->name('tribunais.update');
     Route::patch('/tribunais/{tribunal}/ativo', [TribunalController::class, 'toggleAtivo'])->name('tribunais.toggle');
+
+    Route::get('/tokens', [ApiTokenController::class, 'index'])->name('tokens.index');
+    Route::get('/tokens/criar', [ApiTokenController::class, 'create'])->name('tokens.create');
+    Route::post('/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');
+    Route::patch('/tokens/{apiToken}/ativo', [ApiTokenController::class, 'toggleAtivo'])->name('tokens.toggle');
+    Route::delete('/tokens/{apiToken}', [ApiTokenController::class, 'destroy'])->name('tokens.destroy');
 });
