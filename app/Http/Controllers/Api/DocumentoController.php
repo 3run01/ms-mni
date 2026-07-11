@@ -26,6 +26,11 @@ class DocumentoController extends Controller
 
     public function show(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         try {
             $maxTentativas = 3;
             $tentativa = 0;
@@ -36,8 +41,8 @@ class DocumentoController extends Controller
                     $request->id_documento,
                     $request->numero_processo,
                     $tribunal,
-                    $request->login_pje ?? null,
-                    $request->senha_pje ?? null
+                    $request->login_pje,
+                    $request->senha_pje
                 );
 
                 if (!empty($documento) && !empty($documento->link)) {
@@ -150,6 +155,11 @@ class DocumentoController extends Controller
 
     public function listarDocumentos(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
         $processo = Processo::with('documentos')
             ->where('numero_processo', $numero_processo)
@@ -163,8 +173,8 @@ class DocumentoController extends Controller
         $processo = $this->processoService->consultarDocumentos(
             Tribunal::find($request->tribunal_id),
             $numero_processo,
-            $request->login_pje ?? null,
-            $request->senha_pje ?? null,
+            $request->login_pje,
+            $request->senha_pje,
             $request->data_referencia ?? null,
         );
 
@@ -179,7 +189,12 @@ class DocumentoController extends Controller
 
     public function consultarDocumentosAsync(Request $request)
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        ConsultarDocumentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
+        ConsultarDocumentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo, $request->login_pje, $request->senha_pje)->onQueue('alta');
     }
 }

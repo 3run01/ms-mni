@@ -5,15 +5,17 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class AuthController extends Controller
 {
     /**
      * Show the login form.
      */
-    public function showLogin()
+    public function showLogin(): Response
     {
-        return view('auth.login');
+        return Inertia::render('auth/login');
     }
 
     /**
