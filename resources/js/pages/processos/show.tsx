@@ -53,7 +53,7 @@ interface Props {
 export default function ProcessosShow({ processo, movimentos, documentos }: Props) {
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Processos', href: '/processos' },
-        { title: processo.numero_processo },
+        { title: processo.numero_processo, href: `/processos/${processo.id}` },
     ];
 
     return (
