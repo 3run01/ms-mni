@@ -133,7 +133,10 @@ export default function ProcessosIndex({
     errors,
 }: Props) {
     const [busca, setBusca] = useState(filtros.busca ?? '');
+    const [orgaoJulgador, setOrgaoJulgador] = useState(filtros.orgao_julgador ?? '');
     const primeiraRenderizacao = useRef(true);
+    const filtrosRef = useRef(filtros);
+    filtrosRef.current = filtros;
     const [maisFiltros, setMaisFiltros] = useState(
         Boolean(filtros.data_inicio || filtros.data_fim || filtros.orgao_julgador || filtros.nivel_sigilo !== undefined && filtros.nivel_sigilo !== ''),
     );
@@ -142,9 +145,9 @@ export default function ProcessosIndex({
 
     const mudarFiltro = useCallback(
         (mudanca: Partial<ProcessoFiltros>) => {
-            aplicarFiltros({ ...filtros, busca: busca || undefined, ...mudanca });
+            aplicarFiltros({ ...filtrosRef.current, busca: busca || undefined, ...mudanca });
         },
-        [filtros, busca],
+        [busca],
     );
 
     // debounce de 400ms na busca por número
@@ -154,7 +157,7 @@ export default function ProcessosIndex({
             return;
         }
         const timer = setTimeout(() => {
-            aplicarFiltros({ ...filtros, busca: busca || undefined });
+            aplicarFiltros({ ...filtrosRef.current, busca: busca || undefined });
         }, 400);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,6 +243,7 @@ export default function ProcessosIndex({
                                     size="sm"
                                     onClick={() => {
                                         setBusca('');
+                                        setOrgaoJulgador('');
                                         aplicarFiltros({});
                                     }}
                                 >
@@ -273,7 +277,8 @@ export default function ProcessosIndex({
                                     <Input
                                         id="orgao_julgador"
                                         placeholder="Nome do órgão..."
-                                        defaultValue={filtros.orgao_julgador ?? ''}
+                                        value={orgaoJulgador}
+                                        onChange={(e) => setOrgaoJulgador(e.target.value)}
                                         onBlur={(e) => mudarFiltro({ orgao_julgador: e.target.value || undefined })}
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') {
