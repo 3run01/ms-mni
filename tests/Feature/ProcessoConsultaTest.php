@@ -203,3 +203,15 @@ it('entrega opcoes de filtro como props', function () {
             ->has('statusOptions', 4)
             ->has('niveisSigilo'));
 });
+
+it('nao quebra a listagem quando ha classe_codigo nao numerico', function () {
+    $prefixo = 'T2NONNUM' . getmypid();
+    novoProcesso(['numero_processo' => $prefixo . 'A', 'classe_codigo' => 'ABC123']);
+
+    $this->actingAs(loginProcessos())
+        ->get('/processos?busca=' . $prefixo)
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('processos.data', 1)
+            ->has('classes'));
+});

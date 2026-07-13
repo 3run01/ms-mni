@@ -32,7 +32,7 @@ class ProcessoController extends Controller
         ]);
 
         $processos = Processo::query()
-            ->without(['prioridades', 'assuntos'])
+            ->without(['prioridades', 'assuntos', 'classe'])
             ->when($filtros['busca'] ?? null,
                 fn ($q, $v) => $q->where('numero_processo', 'ilike', "%{$v}%"))
             ->when($filtros['tribunal_id'] ?? null,
@@ -58,7 +58,7 @@ class ProcessoController extends Controller
                 'id' => $p->id,
                 'numero_processo' => $p->numero_processo,
                 'tribunal' => $p->tribunal?->nome,
-                'classe' => $p->classe?->descricao,
+                'classe' => null,
                 'status' => $p->status,
                 'valor_causa' => $p->valor_causa,
                 'created_at' => $p->created_at,
@@ -69,7 +69,7 @@ class ProcessoController extends Controller
             'filtros' => $filtros,
             'tribunais' => Tribunal::query()->select(['id', 'nome'])->orderBy('nome')->get(),
             'classes' => ClasseCNJ::query()
-                ->whereIn('codigo', Processo::query()->selectRaw('CAST(classe_codigo as integer)')->whereNotNull('classe_codigo')->distinct())
+                ->whereIn(DB::raw('CAST(codigo AS varchar)'), Processo::query()->select('classe_codigo')->whereNotNull('classe_codigo')->distinct())
                 ->orderBy('descricao')
                 ->get(['codigo', 'descricao'])
                 ->map(fn ($c) => ['codigo' => $c->codigo, 'descricao' => $c->descricao]),
