@@ -3,6 +3,10 @@
 use App\Models\Processo;
 use App\Models\Tribunal;
 use App\Models\User;
+use App\Models\ProcessoDocumento;
+use App\Models\ProcessoMovimento;
+use App\Models\ProcessoParte;
+use App\Models\ProcessoParteRepresentante;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\MultiConnectionDatabaseTestCase;
 
@@ -214,4 +218,94 @@ it('nao quebra a listagem quando ha classe_codigo nao numerico', function () {
         ->assertInertia(fn (Assert $page) => $page
             ->has('processos.data', 1)
             ->has('classes'));
+});
+
+it('redireciona visitante para o login no detalhe', function () {
+    $processo = novoProcesso();
+
+    $this->get("/processos/{$processo->id}")->assertRedirect('/login');
+});
+
+it('retorna 404 para processo inexistente', function () {
+    $this->actingAs(loginProcessos())
+        ->get('/processos/999999999')
+        ->assertNotFound();
+});
+
+it('mostra dados gerais, partes com representantes e assuntos', function () {
+    $tribunal = Tribunal::factory()->create(['nome' => 'Tribunal Detalhe']);
+    $processo = novoProcesso([
+        'tribunal_id' => $tribunal->id,
+        'nome_orgao_julgador' => 'Vara do Detalhe',
+        'nivel_sigilo' => '1',
+    ]);
+    $processo->assuntos()->create(['nome' => 'Assunto Teste', 'assunto_codigo' => '123', 'principal' => true]);
+    $processo->prioridades()->create(['descricao' => 'Idoso']);
+    $parte = $processo->partes()->create(['nome' => 'Fulano de Tal', 'cpf_cnpj' => '12345678901', 'polo' => 'AT', 'municipio' => 'Macapá', 'estado' => 'AP']);
+    ProcessoParteRepresentante::create([
+        'processo_id' => $processo->id,
+        'parte_id' => $parte->id,
+        'nome' => 'Dra. Advogada',
+        'tipo_representante' => 'A',
+    ]);
+
+    $this->actingAs(loginProcessos())
+        ->get("/processos/{$processo->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('processos/show')
+            ->where('processo.id', $processo->id)
+            ->where('processo.tribunal', 'Tribunal Detalhe')
+            ->where('processo.orgao_julgador', 'Vara do Detalhe')
+            ->where('processo.nivel_sigilo', '1 - Segredo de Justiça')
+            ->where('processo.assuntos.0.nome', 'Assunto Teste')
+            ->where('processo.prioridades.0', 'Idoso')
+            ->where('processo.partes.0.nome', 'Fulano de Tal')
+            ->where('processo.partes.0.polo', 'Ativo')
+            ->where('processo.partes.0.representantes.0.nome', 'Dra. Advogada')
+            ->where('processo.partes.0.representantes.0.tipo', 'Advogado')
+            ->missing('processo.payload_envio'));
+});
+
+it('adia movimentos e documentos e entrega no partial reload sem conteudo pesado', function () {
+    $processo = novoProcesso();
+    ProcessoMovimento::create([
+        'processo_id' => $processo->id,
+        'identificador_movimento' => 'MOV-1',
+        'codigo_nacional' => 26,
+        'complemento' => 'Distribuição',
+        'data_hora' => '2026-01-05 10:00:00',
+    ]);
+    ProcessoDocumento::create([
+        'processo_id' => $processo->id,
+        'id_documento' => 'DOC-1',
+        'tipo_documento' => 57,
+        'descricao' => 'Petição Inicial',
+        'mimetype' => 'application/pdf',
+        'data_hora' => '2026-01-05 10:00:00',
+        'status' => 'baixado',
+        'file_size' => 2048,
+    ]);
+
+    // primeiro carregamento: deferred props ausentes
+    $this->actingAs(loginProcessos())
+        ->get("/processos/{$processo->id}")
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('processos/show')
+            ->missing('movimentos')
+            ->missing('documentos'));
+
+    // partial reload (como o Inertia faz no cliente) entrega os dados
+    $this->actingAs(loginProcessos())
+        ->get("/processos/{$processo->id}", [
+            'X-Inertia' => 'true',
+            'X-Inertia-Version' => \Inertia\Inertia::getVersion() ?? '',
+            'X-Inertia-Partial-Component' => 'processos/show',
+            'X-Inertia-Partial-Data' => 'movimentos,documentos',
+        ])
+        ->assertOk()
+        ->assertJsonPath('props.movimentos.0.complemento', 'Distribuição')
+        ->assertJsonPath('props.documentos.0.descricao', 'Petição Inicial')
+        ->assertJsonMissingPath('props.documentos.0.conteudo_html')
+        ->assertJsonMissingPath('props.documentos.0.path');
 });

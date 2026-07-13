@@ -38,4 +38,5 @@ Route::middleware('auth:web')->group(function () {
     Route::delete('/tokens/{apiToken}', [ApiTokenController::class, 'destroy'])->name('tokens.destroy');
 
     Route::get('/processos', [ProcessoController::class, 'index'])->name('processos.index');
+    Route::get('/processos/{processo}', [ProcessoController::class, 'show'])->name('processos.show');
 });

@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\ClasseCNJ;
 use App\Models\Processo;
 use App\Models\Tribunal;
+use App\Models\ProcessoParte;
+use App\Models\ProcessoParteRepresentante;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -80,6 +82,84 @@ class ProcessoController extends Controller
                 Processo::STATUS_ARQUIVADO,
             ],
             'niveisSigilo' => Processo::niveisSigilo(),
+        ]);
+    }
+
+    public function show(Processo $processo): Response
+    {
+        $processo->load(['partes.representantesProcessual']);
+
+        $polos = ProcessoParte::modalidadePolo();
+        $tiposRepresentante = ProcessoParteRepresentante::tipoRepresentante();
+        $niveisSigilo = Processo::niveisSigilo();
+
+        return Inertia::render('processos/show', [
+            'processo' => [
+                'id' => $processo->id,
+                'numero_processo' => $processo->numero_processo,
+                'status' => $processo->status,
+                'tribunal' => $processo->tribunal?->nome,
+                'classe' => $processo->classe?->descricao,
+                'orgao_julgador' => $processo->nome_orgao_julgador,
+                'instancia_orgao_julgador' => $processo->instancia_orgao_julgador,
+                'valor_causa' => $processo->valor_causa,
+                'nivel_sigilo' => $niveisSigilo[(int) $processo->nivel_sigilo] ?? $processo->nivel_sigilo,
+                'justica_gratuita' => $processo->justica_gratuita,
+                'pedido_liminar' => $processo->pedido_liminar,
+                'motivo_segredo_justica' => $processo->motivo_segredo_justica,
+                'created_at' => $processo->created_at,
+                'assuntos' => $processo->assuntos->map(fn ($a) => [
+                    'nome' => $a->nome,
+                    'assunto_codigo' => $a->assunto_codigo,
+                    'principal' => (bool) $a->principal,
+                ]),
+                'prioridades' => $processo->prioridades->pluck('descricao'),
+                'partes' => $processo->partes->map(fn ($parte) => [
+                    'id' => $parte->id,
+                    'polo' => $polos[$parte->polo] ?? $parte->polo,
+                    'nome' => $parte->nome,
+                    'cpf_cnpj' => $parte->cpf_cnpj,
+                    'endereco' => collect([
+                        $parte->logradouro,
+                        $parte->numero,
+                        $parte->bairro,
+                        $parte->municipio,
+                        $parte->estado,
+                        $parte->cep,
+                    ])->filter()->implode(', '),
+                    'representantes' => $parte->representantesProcessual->map(fn ($r) => [
+                        'id' => $r->id,
+                        'nome' => $r->nome,
+                        'numero_documento_principal' => $r->numero_documento_principal,
+                        'inscricao' => $r->inscricao,
+                        'tipo' => $tiposRepresentante[$r->tipo_representante] ?? $r->tipo_representante,
+                    ]),
+                ]),
+            ],
+            // deferred: processos antigos têm centenas de movimentos/documentos;
+            // o primeiro paint não espera por eles
+            'movimentos' => Inertia::defer(fn () => $processo->movimentos()
+                ->get(['id', 'codigo_nacional', 'complemento', 'data_hora', 'id_documento_vinculado'])
+                ->map(fn ($m) => [
+                    'id' => $m->id,
+                    'codigo_nacional' => $m->codigo_nacional,
+                    'complemento' => $m->complemento,
+                    'data_hora' => $m->data_hora,
+                    'tem_documento' => filled($m->id_documento_vinculado),
+                ])),
+            'documentos' => Inertia::defer(fn () => $processo->documentos()
+                ->get(['id', 'descricao', 'tipo_documento', 'mimetype', 'file_size', 'nivel_sigilo', 'data_juntada', 'data_hora', 'status'])
+                ->map(fn ($d) => [
+                    'id' => $d->id,
+                    'descricao' => $d->descricao,
+                    'tipo_documento' => $d->tipo_documento,
+                    'mimetype' => $d->mimetype,
+                    'file_size' => $d->file_size,
+                    'nivel_sigilo' => $d->nivel_sigilo,
+                    'data_juntada' => $d->data_juntada,
+                    'data_hora' => $d->data_hora,
+                    'status' => $d->status,
+                ])),
         ]);
     }
 }
