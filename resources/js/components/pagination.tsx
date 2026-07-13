@@ -3,6 +3,14 @@ import { Link } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
 import { type Paginated } from '@/types';
 
+// O projeto não tem lang/ publicado, então o Laravel devolve as chaves de
+// tradução cruas nos links de anterior/próximo — traduz aqui no cliente.
+function rotuloLink(label: string): string {
+    if (label === 'pagination.previous') return '‹ Anterior';
+    if (label === 'pagination.next') return 'Próximo ›';
+    return label;
+}
+
 export function Pagination({ paginator }: { paginator: Paginated<unknown> }) {
     if (paginator.total === 0) return null;
 
@@ -22,7 +30,7 @@ export function Pagination({ paginator }: { paginator: Paginated<unknown> }) {
                     >
                         {link.url ? (
                             <Link href={link.url} preserveScroll preserveState only={['processos']}>
-                                <span dangerouslySetInnerHTML={{ __html: link.label }} />
+                                <span dangerouslySetInnerHTML={{ __html: rotuloLink(link.label) }} />
                             </Link>
                         ) : (
                             <span dangerouslySetInnerHTML={{ __html: link.label }} />
