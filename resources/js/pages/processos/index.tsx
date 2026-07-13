@@ -187,7 +187,7 @@ export default function ProcessosIndex({
                                 value={String(filtros.tribunal_id ?? 'todos')}
                                 onValueChange={(v) => mudarFiltro({ tribunal_id: v === 'todos' ? undefined : v })}
                             >
-                                <SelectTrigger>
+                                <SelectTrigger className="w-full">
                                     <SelectValue placeholder="Todos" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -206,7 +206,7 @@ export default function ProcessosIndex({
                                 value={filtros.status ?? 'todos'}
                                 onValueChange={(v) => mudarFiltro({ status: v === 'todos' ? undefined : v })}
                             >
-                                <SelectTrigger>
+                                <SelectTrigger className="w-full">
                                     <SelectValue placeholder="Todos" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -293,7 +293,7 @@ export default function ProcessosIndex({
                                         value={String(filtros.nivel_sigilo ?? 'todos')}
                                         onValueChange={(v) => mudarFiltro({ nivel_sigilo: v === 'todos' ? undefined : v })}
                                     >
-                                        <SelectTrigger>
+                                        <SelectTrigger className="w-full">
                                             <SelectValue placeholder="Todos" />
                                         </SelectTrigger>
                                         <SelectContent>
