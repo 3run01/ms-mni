@@ -33,6 +33,15 @@ class ProcessoController extends Controller
             'nivel_sigilo' => ['nullable', 'integer', 'between:0,5'],
         ]);
 
+        // Mapa codigo->descricao das classes referenciadas por processos, reutilizado
+        // para rotular as linhas E alimentar o filtro. CAST(codigo AS varchar): codigo é
+        // integer em cnj.classes, classe_codigo é varchar (dado externo do MNI).
+        $classes = ClasseCNJ::query()
+            ->whereIn(DB::raw('CAST(codigo AS varchar)'), Processo::query()->select('classe_codigo')->whereNotNull('classe_codigo')->distinct())
+            ->orderBy('descricao')
+            ->get(['codigo', 'descricao']);
+        $classesMap = $classes->keyBy(fn ($c) => (string) $c->codigo);
+
         $processos = Processo::query()
             ->without(['prioridades', 'assuntos', 'classe'])
             ->when($filtros['busca'] ?? null,
@@ -60,7 +69,7 @@ class ProcessoController extends Controller
                 'id' => $p->id,
                 'numero_processo' => $p->numero_processo,
                 'tribunal' => $p->tribunal?->nome,
-                'classe' => null,
+                'classe' => $classesMap->get((string) $p->classe_codigo)?->descricao,
                 'status' => $p->status,
                 'valor_causa' => $p->valor_causa,
                 'created_at' => $p->created_at,
@@ -70,11 +79,7 @@ class ProcessoController extends Controller
             'processos' => $processos,
             'filtros' => $filtros,
             'tribunais' => Tribunal::query()->select(['id', 'nome'])->orderBy('nome')->get(),
-            'classes' => ClasseCNJ::query()
-                ->whereIn(DB::raw('CAST(codigo AS varchar)'), Processo::query()->select('classe_codigo')->whereNotNull('classe_codigo')->distinct())
-                ->orderBy('descricao')
-                ->get(['codigo', 'descricao'])
-                ->map(fn ($c) => ['codigo' => $c->codigo, 'descricao' => $c->descricao]),
+            'classes' => $classes->map(fn ($c) => ['codigo' => $c->codigo, 'descricao' => $c->descricao]),
             'statusOptions' => [
                 Processo::STATUS_PENDENTE_ENVIO,
                 Processo::STATUS_PROCESSANDO_ENVIO,
@@ -85,9 +90,18 @@ class ProcessoController extends Controller
         ]);
     }
 
-    public function show(Processo $processo): Response
+    public function show(string $processo): Response
     {
-        $processo->load(['partes.representantesProcessual']);
+        // Resolve manualmente sem o eager-load default de `classe` ($with do model):
+        // a relação classe (classe_codigo varchar -> cnj.classes.codigo integer) estoura
+        // 22P02 se classe_codigo for não-numérico. Mesma proteção do index.
+        $processo = Processo::without(['classe'])
+            ->with(['partes.representantesProcessual'])
+            ->findOrFail($processo);
+
+        $classeDescricao = ClasseCNJ::query()
+            ->where(DB::raw('CAST(codigo AS varchar)'), $processo->classe_codigo)
+            ->value('descricao');
 
         $polos = ProcessoParte::modalidadePolo();
         $tiposRepresentante = ProcessoParteRepresentante::tipoRepresentante();
@@ -99,7 +113,7 @@ class ProcessoController extends Controller
                 'numero_processo' => $processo->numero_processo,
                 'status' => $processo->status,
                 'tribunal' => $processo->tribunal?->nome,
-                'classe' => $processo->classe?->descricao,
+                'classe' => $classeDescricao,
                 'orgao_julgador' => $processo->nome_orgao_julgador,
                 'instancia_orgao_julgador' => $processo->instancia_orgao_julgador,
                 'valor_causa' => $processo->valor_causa,

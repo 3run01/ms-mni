@@ -220,6 +220,18 @@ it('nao quebra a listagem quando ha classe_codigo nao numerico', function () {
             ->has('classes'));
 });
 
+it('rotula a classe na listagem', function () {
+    $prefixo = 'FCLASSE' . getmypid();
+    $codigo = (string) (900000000 + getmypid()); // codigo numérico fora da faixa real do CNJ, evita colisão com dado seedado
+    \App\Models\ClasseCNJ::create(['codigo' => $codigo, 'descricao' => 'Classe Teste ' . $prefixo, 'situacao' => 'A']);
+    novoProcesso(['numero_processo' => $prefixo . 'A', 'classe_codigo' => $codigo]);
+
+    $this->actingAs(loginProcessos())
+        ->get('/processos?busca=' . $prefixo)
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('processos.data.0.classe', 'Classe Teste ' . $prefixo));
+});
+
 it('redireciona visitante para o login no detalhe', function () {
     $processo = novoProcesso();
 
@@ -230,6 +242,14 @@ it('retorna 404 para processo inexistente', function () {
     $this->actingAs(loginProcessos())
         ->get('/processos/999999999')
         ->assertNotFound();
+});
+
+it('abre o detalhe mesmo com classe_codigo nao numerico', function () {
+    $processo = novoProcesso(['numero_processo' => 'FSHOW' . getmypid(), 'classe_codigo' => 'XYZ']);
+
+    $this->actingAs(loginProcessos())
+        ->get("/processos/{$processo->id}")
+        ->assertOk();
 });
 
 it('mostra dados gerais, partes com representantes e assuntos', function () {
