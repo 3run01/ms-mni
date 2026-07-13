@@ -33,7 +33,7 @@ export function Pagination({ paginator }: { paginator: Paginated<unknown> }) {
                                 <span dangerouslySetInnerHTML={{ __html: rotuloLink(link.label) }} />
                             </Link>
                         ) : (
-                            <span dangerouslySetInnerHTML={{ __html: link.label }} />
+                            <span dangerouslySetInnerHTML={{ __html: rotuloLink(link.label) }} />
                         )}
                     </Button>
                 ))}
