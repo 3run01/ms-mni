@@ -257,6 +257,76 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErroMensagem' }
+  /processo/download:
+    post:
+      tags: [Processos]
+      summary: Exportar processo em PDF (assíncrono)
+      description: |
+        Enfileira a geração de um PDF de exportação. O arquivo pronto é
+        entregue via webhook de saída (ver seção `webhooks`). Retorna
+        imediatamente o `exportacao_id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numero_processo, user_id, titulo, formato]
+              properties:
+                numero_processo: { type: string, maxLength: 25 }
+                tribunal_id: { type: [integer, 'null'] }
+                user_id: { type: integer, minimum: 1, description: "Eco no webhook." }
+                titulo: { type: string, maxLength: 255, description: "Eco no webhook." }
+                formato: { type: string, enum: [pdf] }
+                ids_selecionados:
+                  type: array
+                  items: { type: integer }
+                periodo_inicial: { type: string, format: date, description: "required_with periodo_final" }
+                periodo_final: { type: string, format: date, description: "required_with periodo_inicial" }
+                id_inicial: { type: integer, description: "required_with id_final" }
+                id_final: { type: integer, description: "required_with id_inicial" }
+      responses:
+        '200':
+          description: Exportação enfileirada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportacaoEnfileirada' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404':
+          description: Nenhum documento encontrado com os filtros aplicados.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+              example: { error: "Nenhum documento encontrado para o processo informado com os filtros aplicados." }
+        '422': { $ref: '#/components/responses/Erro422' }
+webhooks:
+  download:
+    post:
+      summary: Notificação de conclusão da exportação (ms-mni → cliente SIM)
+      description: |
+        O ms-mni faz `POST {SIM_URL}/webhook/download` ao concluir (ou falhar) a
+        geração do PDF. O cliente SIM implementa este endpoint. Payload tipado por
+        status.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, user_id, titulo]
+              properties:
+                status: { type: string, enum: [concluido, falhou] }
+                user_id: { type: integer }
+                titulo: { type: string }
+                exportacao_id: { type: integer }
+                arquivo_url:
+                  type: [string, 'null']
+                  format: uri
+                  description: "Presente em status=concluido. PDF em downloads/{user_id}/{uuid}.pdf."
+                erro:
+                  type: [string, 'null']
+                  description: "Presente em status=falhou."
+      responses:
+        '200': { description: Webhook recebido pelo cliente. }
 components:
   securitySchemes:
     ApiToken:
