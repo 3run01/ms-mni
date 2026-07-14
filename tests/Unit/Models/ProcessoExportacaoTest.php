@@ -49,3 +49,13 @@ it('factory falhou() seta status falhou e erro_resumo informado', function () {
     expect($exportacao->status)->toBe(ProcessoExportacao::STATUS_FALHOU);
     expect($exportacao->erro_resumo)->toBe('teste de erro');
 });
+
+it('persiste callback_url e callback_token', function () {
+    $e = \App\Models\ProcessoExportacao::factory()->create([
+        'callback_url' => 'https://cliente.exemplo.gov.br/webhook',
+        'callback_token' => 'segredo-123',
+    ]);
+
+    expect($e->fresh()->callback_url)->toBe('https://cliente.exemplo.gov.br/webhook')
+        ->and($e->fresh()->callback_token)->toBe('segredo-123');
+});
