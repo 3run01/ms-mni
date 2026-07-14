@@ -33,7 +33,7 @@ it('ConsultarDadosBasicosProcessoMNIJob::handle() repassa login_pje/senha_pje pa
             });
     });
 
-    (new ConsultarDadosBasicosProcessoMNIJob(1, $numero, 'login-x', 'senha-x', 'https://callback.exemplo/webhook', 'tok-x'))->handle();
+    (new ConsultarDadosBasicosProcessoMNIJob(1, $numero, 'login-x', 'senha-x', 'https://example.com/webhook', 'tok-x'))->handle();
 });
 
 it('ConsultarMovimentosProcessoMNIJob::handle() repassa login_pje/senha_pje para consultarMovimentos sem data_referencia', function () {
@@ -53,7 +53,7 @@ it('ConsultarMovimentosProcessoMNIJob::handle() repassa login_pje/senha_pje para
             });
     });
 
-    (new ConsultarMovimentosProcessoMNIJob(1, $numero, 'login-x', 'senha-x', 'https://callback.exemplo/webhook', 'tok-x'))->handle();
+    (new ConsultarMovimentosProcessoMNIJob(1, $numero, 'login-x', 'senha-x', 'https://example.com/webhook', 'tok-x'))->handle();
 });
 
 it('ConsultarDocumentosProcessoMNIJob::handle() repassa login_pje/senha_pje para consultarDocumentos sem data_referencia', function () {
@@ -73,7 +73,7 @@ it('ConsultarDocumentosProcessoMNIJob::handle() repassa login_pje/senha_pje para
             });
     });
 
-    (new ConsultarDocumentosProcessoMNIJob(1, $numero, 'login-x', 'senha-x', 'https://callback.exemplo/webhook', 'tok-x'))->handle();
+    (new ConsultarDocumentosProcessoMNIJob(1, $numero, 'login-x', 'senha-x', 'https://example.com/webhook', 'tok-x'))->handle();
 });
 
 // ---------- Task 6: endpoints async exigem callback_url/callback_token e jobs notificam o chamador ----------
@@ -91,9 +91,9 @@ it('job de dados-basicos POSTa callback ao concluir', function () {
         $m->shouldReceive('consultarDadosBasicos')->andReturn(new Processo());
     });
 
-    (new ConsultarDadosBasicosProcessoMNIJob(1, '123', 'a', 'b', 'https://c.exemplo/webhook', 'tok'))->handle();
+    (new ConsultarDadosBasicosProcessoMNIJob(1, '123', 'a', 'b', 'https://example.com/webhook', 'tok'))->handle();
 
-    Http::assertSent(fn ($r) => $r->url() === 'https://c.exemplo/webhook'
+    Http::assertSent(fn ($r) => $r->url() === 'https://example.com/webhook'
         && $r->hasHeader('X-API-Token', 'tok')
         && $r['tipo'] === 'dados-basicos' && $r['status'] === 'concluido');
 });
@@ -111,9 +111,9 @@ it('job de movimentos POSTa callback ao concluir', function () {
         $m->shouldReceive('consultarMovimentos')->andReturn(new Processo());
     });
 
-    (new ConsultarMovimentosProcessoMNIJob(1, '123', 'a', 'b', 'https://c.exemplo/webhook', 'tok'))->handle();
+    (new ConsultarMovimentosProcessoMNIJob(1, '123', 'a', 'b', 'https://example.com/webhook', 'tok'))->handle();
 
-    Http::assertSent(fn ($r) => $r->url() === 'https://c.exemplo/webhook'
+    Http::assertSent(fn ($r) => $r->url() === 'https://example.com/webhook'
         && $r->hasHeader('X-API-Token', 'tok')
         && $r['tipo'] === 'movimentos' && $r['status'] === 'concluido');
 });
@@ -131,9 +131,9 @@ it('job de documentos POSTa callback ao concluir', function () {
         $m->shouldReceive('consultarDocumentos')->andReturn(new Processo());
     });
 
-    (new ConsultarDocumentosProcessoMNIJob(1, '123', 'a', 'b', 'https://c.exemplo/webhook', 'tok'))->handle();
+    (new ConsultarDocumentosProcessoMNIJob(1, '123', 'a', 'b', 'https://example.com/webhook', 'tok'))->handle();
 
-    Http::assertSent(fn ($r) => $r->url() === 'https://c.exemplo/webhook'
+    Http::assertSent(fn ($r) => $r->url() === 'https://example.com/webhook'
         && $r->hasHeader('X-API-Token', 'tok')
         && $r['tipo'] === 'documentos' && $r['status'] === 'concluido');
 });

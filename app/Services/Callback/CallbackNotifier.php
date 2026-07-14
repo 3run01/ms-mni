@@ -8,6 +8,8 @@ class CallbackNotifier
 {
     public function notificar(string $url, string $token, array $payload): void
     {
+        app(CallbackUrlValidator::class)->assertValida($url);
+
         $response = Http::withHeaders(['X-API-Token' => $token])
             ->timeout(10)
             ->post($url, $payload);

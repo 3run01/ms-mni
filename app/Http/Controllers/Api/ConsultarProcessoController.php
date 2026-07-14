@@ -223,11 +223,7 @@ class ConsultarProcessoController extends Controller
         $request->validate([
             'login_pje' => 'required|string',
             'senha_pje' => 'required|string',
-            'callback_url' => ['required', 'string', 'max:2048', function ($a, $v, $fail) {
-                if (! app(\App\Services\Callback\CallbackUrlValidator::class)->ehValida((string) $v)) {
-                    $fail('O callback_url deve ser uma URL https válida e não pode apontar para IP interno.');
-                }
-            }],
+            'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
             'callback_token' => ['required', 'string', 'max:500'],
         ]);
 
@@ -243,11 +239,7 @@ class ConsultarProcessoController extends Controller
         $request->validate([
             'login_pje' => 'required|string',
             'senha_pje' => 'required|string',
-            'callback_url' => ['required', 'string', 'max:2048', function ($a, $v, $fail) {
-                if (! app(\App\Services\Callback\CallbackUrlValidator::class)->ehValida((string) $v)) {
-                    $fail('O callback_url deve ser uma URL https válida e não pode apontar para IP interno.');
-                }
-            }],
+            'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
             'callback_token' => ['required', 'string', 'max:500'],
         ]);
 
