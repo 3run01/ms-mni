@@ -49,3 +49,31 @@ it('documentos async despacha job com as credenciais do payload', function () {
         fn ($job) => $job->login_pje === 'u-pje' && $job->senha_pje === 's-pje'
     );
 });
+
+it('listar documentos nao expoe conteudo_html nem path_html', function () {
+    $numero = 'LISTALEVE' . getmypid();
+    $processo = Processo::create([
+        'numero_processo' => $numero,
+        'tribunal_id' => 999999,
+        'valor_causa' => '0.00',
+    ]);
+    \App\Models\ProcessoDocumento::create([
+        'processo_id' => $processo->id,
+        'id_documento' => 910001,
+        'tipo_documento' => '0',
+        'data_hora' => '2026-01-05 10:00:00',
+        'descricao' => 'Sentenca Legada',
+        'mimetype' => 'text/html',
+        'status' => 'baixado',
+    ]);
+    // legado: coluna preenchida direto no banco (fora do fillable)
+    \App\Models\ProcessoDocumento::where('id_documento', 910001)
+        ->update(['conteudo_html' => '<html><body>Conteudo legado pesado</body></html>']);
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson("/api/processo/documentos/listar?tribunal_id=999999&numero_processo={$numero}&login_pje=u&senha_pje=s")
+        ->assertOk()
+        ->assertJsonPath('0.descricao', 'Sentenca Legada')
+        ->assertJsonMissingPath('0.conteudo_html')
+        ->assertJsonMissingPath('0.path_html');
+});

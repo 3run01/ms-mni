@@ -27,6 +27,7 @@ class ProcessoDocumento extends Model
         'status',
         'url',
         'path',
+        'path_html',
         'file_size',
         'tentativas_download',
         'erro_mni',
@@ -39,15 +40,20 @@ class ProcessoDocumento extends Model
     protected $hidden = [
         'id',
         'processo_id',
-        'processo_id',
         'created_at',
         'updated_at',
         'deleted_at',
         'baixado',
         'url',
         'path',
+        'path_html',
+        'conteudo_html',
     ];
 
+    public function temConteudoHtml(): bool
+    {
+        return !empty($this->conteudo_html) || !empty($this->path_html);
+    }
 
     public function processo()
     {
