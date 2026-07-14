@@ -21,6 +21,12 @@ You can delete everything above this and input your own instructions specific to
 
 ---
 
+## Documentação da API
+
+A API REST externa está documentada em [`docs/api/openapi.yaml`](docs/api/openapi.yaml) (OpenAPI 3.1). Renderize com `npx @redocly/cli preview-docs docs/api/openapi.yaml`.
+
+---
+
 # Local Development Setup Guide
 
 ### Step 1: Download / Clone the Project
