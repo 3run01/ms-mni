@@ -66,21 +66,16 @@ paths:
   /processo/consultar:
     get:
       tags: [Processos]
-      summary: Buscar processos por número ou nome de parte
+      summary: Buscar processos por número
       description: |
-        Busca paginada (10 por página). Informe `numero_processo` **ou**
-        `nomeParte`. Na busca por número: se o processo não existe no banco,
-        é baixado do MNI de forma síncrona; se existe, uma atualização é
-        disparada em background.
+        Busca paginada (10 por página) por `numero_processo`. Se o processo não
+        existe no banco, é baixado do MNI de forma síncrona; se existe, uma
+        atualização é disparada em background.
       parameters:
         - { $ref: '#/components/parameters/LoginPje' }
         - { $ref: '#/components/parameters/SenhaPje' }
         - { $ref: '#/components/parameters/TribunalIdQuery' }
         - { $ref: '#/components/parameters/NumeroProcessoQuery' }
-        - name: nomeParte
-          in: query
-          required: false
-          schema: { type: string }
       responses:
         '200':
           description: Página de processos.

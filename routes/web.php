@@ -20,6 +20,7 @@ Route::get('/docs/api', function () {
 Route::get('/docs/api/openapi.yaml', function () {
     return response()->file(base_path('docs/api/openapi.yaml'), [
         'Content-Type' => 'application/yaml',
+        'Cache-Control' => 'no-cache, must-revalidate',
     ]);
 })->name('docs.api.spec');
 
