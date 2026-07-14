@@ -180,11 +180,13 @@ it('dados-basicos async despacha job com as credenciais do payload', function ()
     Queue::fake();
 
     $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/consultar/dados-basicos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=u-pje&senha_pje=s-pje');
+        ->getJson('/api/processo/consultar/dados-basicos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=u-pje&senha_pje=s-pje&callback_url=https://example.com/webhook&callback_token=tok-x')
+        ->assertOk();
 
     Queue::assertPushed(
         ConsultarDadosBasicosProcessoMNIJob::class,
         fn ($job) => $job->login_pje === 'u-pje' && $job->senha_pje === 's-pje'
+            && $job->callback_url === 'https://example.com/webhook' && $job->callback_token === 'tok-x'
     );
 });
 
@@ -199,10 +201,12 @@ it('movimentos async despacha job com as credenciais do payload', function () {
     Queue::fake();
 
     $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/consultar/movimentos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=u-pje&senha_pje=s-pje');
+        ->getJson('/api/processo/consultar/movimentos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=u-pje&senha_pje=s-pje&callback_url=https://example.com/webhook&callback_token=tok-x')
+        ->assertOk();
 
     Queue::assertPushed(
         ConsultarMovimentosProcessoMNIJob::class,
         fn ($job) => $job->login_pje === 'u-pje' && $job->senha_pje === 's-pje'
+            && $job->callback_url === 'https://example.com/webhook' && $job->callback_token === 'tok-x'
     );
 });
