@@ -23,6 +23,8 @@ class ExportacaoProcessoService
             'tribunal_id' => $dados['tribunal_id'] ?? null,
             'titulo' => $dados['titulo'],
             'formato' => $dados['formato'],
+            'callback_url' => $dados['callback_url'],
+            'callback_token' => $dados['callback_token'],
             'status' => ProcessoExportacao::STATUS_ENFILEIRADO,
             'filtros' => [
                 'ids_selecionados' => $dados['ids_selecionados'] ?? null,

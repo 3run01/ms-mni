@@ -22,6 +22,8 @@ function payloadValidoExportacao(array $overrides = []): array
         'titulo' => 'Processo X — PDF',
         'formato' => 'pdf',
         'ids_selecionados' => [1],
+        'callback_url' => 'https://example.com/webhook',
+        'callback_token' => 'tok',
     ], $overrides);
 }
 
@@ -122,4 +124,31 @@ it('retorna 401 com token inválido', function () {
         ->postJson('/api/processo/download', payloadValidoExportacao());
 
     $response->assertStatus(401);
+});
+
+it('rejeita download sem callback_url/callback_token', function () {
+    $resposta = $this->withHeader('X-API-Token', 'tk-test')
+        ->postJson('/api/processo/download', [
+            'numero_processo' => '6000146-58.2026.8.03.0004',
+            'user_id' => 1,
+            'titulo' => 'Autos',
+            'formato' => 'pdf',
+        ]);
+
+    $resposta->assertStatus(422)
+        ->assertJsonValidationErrors(['callback_url', 'callback_token']);
+});
+
+it('rejeita callback_url http ou interna', function () {
+    $resposta = $this->withHeader('X-API-Token', 'tk-test')
+        ->postJson('/api/processo/download', [
+            'numero_processo' => '6000146-58.2026.8.03.0004',
+            'user_id' => 1,
+            'titulo' => 'Autos',
+            'formato' => 'pdf',
+            'callback_url' => 'http://localhost/webhook',
+            'callback_token' => 'tok',
+        ]);
+
+    $resposta->assertStatus(422)->assertJsonValidationErrors(['callback_url']);
 });

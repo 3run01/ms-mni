@@ -26,6 +26,12 @@ class CriarExportacaoProcessoRequest extends FormRequest
             'periodo_final' => ['nullable', 'date_format:Y-m-d', 'required_with:periodo_inicial'],
             'id_inicial' => ['nullable', 'integer', 'required_with:id_final'],
             'id_final' => ['nullable', 'integer', 'required_with:id_inicial'],
+            'callback_url' => ['required', 'string', 'max:2048', function ($attribute, $value, $fail) {
+                if (! app(\App\Services\Callback\CallbackUrlValidator::class)->ehValida((string) $value)) {
+                    $fail('O callback_url deve ser uma URL https válida e não pode apontar para IP interno.');
+                }
+            }],
+            'callback_token' => ['required', 'string', 'max:500'],
         ];
     }
 
