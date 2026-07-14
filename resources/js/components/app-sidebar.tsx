@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { Activity, FileText, KeyRound, Landmark, LayoutGrid, LayoutList, Scale } from 'lucide-react';
+import { Activity, BookOpen, FileText, KeyRound, Landmark, LayoutGrid, LayoutList, Scale } from 'lucide-react';
 
 import AppLogo from '@/components/app-logo';
 import { NavMain } from '@/components/nav-main';
@@ -35,6 +35,12 @@ const mainNavItems: NavItem[] = [
         title: 'Tokens de API',
         href: '/tokens',
         icon: KeyRound,
+    },
+    {
+        title: 'Documentação da API',
+        href: '/docs/api',
+        icon: BookOpen,
+        external: true,
     },
 ];
 
