@@ -71,9 +71,10 @@ re-executa com segurança.
   - coluna `conteudo_html` preenchida → retorna direto (legado);
   - senão, `path_html` preenchido → `Storage::disk('s3')->get($path_html)`;
   - senão → `null`.
-- `DocumentoController::getDocumento`: ao montar a resposta do `visualizar` para documentos
-  HTML, injeta o valor de `obterConteudoHtml` no JSON **no momento da resposta, sem
-  persistir nada de volta** na coluna. O formato do response não muda para o consumidor.
+- `DocumentoController::getDocumento`: ao montar a resposta do `visualizar`, injeta o valor
+  de `obterConteudoHtml` no JSON **no momento da resposta, sem persistir nada de volta** na
+  coluna. A chave `conteudo_html` aparece sempre no response (nula para documentos
+  não-HTML), preservando exatamente o formato atual para o consumidor.
 
 ### Serialização e API
 
@@ -88,9 +89,10 @@ re-executa com segurança.
 - **Upload falhou (PDF ou HTML):** exceção propaga, documento `pendente`, job re-tenta —
   semântica atual preservada.
 - **`path_html` aponta para objeto ausente/S3 indisponível na leitura:**
-  `obterConteudoHtml` captura a falha e o fluxo re-executa `downloadHTML` (re-baixa do MNI
-  e regrava PDF + HTML) — mesmo padrão de auto-correção já usado para PDFs via
-  `Storage::exists($documento->path)`. Se a re-tentativa falhar, loga e responde com
+  `obterConteudoHtml` captura a falha e retorna `null`. Nesse caso, `getDocumento` (que tem
+  as credenciais PJe da requisição) chama `downloadHTML` uma vez — re-baixa do MNI e
+  regrava PDF + HTML — e hidrata de novo; mesmo padrão de auto-correção já usado para PDFs
+  via `Storage::exists($documento->path)`. Se a re-tentativa falhar, loga e responde com
   `conteudo_html` nulo; o consumidor ainda recebe o `link` do PDF.
 - **Legado:** registros com a coluna preenchida não dependem do S3 para servir o HTML.
 
