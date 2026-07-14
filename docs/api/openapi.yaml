@@ -36,3 +36,97 @@ components:
       in: header
       name: X-API-Token
       description: Token de API emitido pelo ms-mni.
+  schemas:
+    Erro:
+      type: object
+      description: Erro genérico com detalhes de origem (respostas 500).
+      properties:
+        error:
+          type: string
+          example: "Mensagem do erro"
+        line:
+          type: integer
+          example: 49
+        file:
+          type: string
+          example: "/app/Http/Controllers/Api/ConsultarProcessoController.php"
+      required: [error]
+    ErroMensagem:
+      type: object
+      description: Erro simples com apenas mensagem.
+      properties:
+        message:
+          type: string
+          example: "Token inválido ou não fornecido"
+      required: [message]
+  parameters:
+    LoginPje:
+      name: login_pje
+      in: query
+      required: true
+      description: Login do usuário no PJe. Enviado na query string (ver aviso de segurança).
+      schema: { type: string }
+    SenhaPje:
+      name: senha_pje
+      in: query
+      required: true
+      description: Senha do usuário no PJe. Enviada na query string (ver aviso de segurança).
+      schema: { type: string }
+    TribunalIdQuery:
+      name: tribunal_id
+      in: query
+      required: false
+      description: ID do tribunal. Obrigatório na prática para consultas de processo.
+      schema: { type: integer }
+    NumeroProcessoQuery:
+      name: numero_processo
+      in: query
+      required: false
+      description: Número do processo (será normalizado internamente).
+      schema: { type: string }
+    DataReferencia:
+      name: data_referencia
+      in: query
+      required: false
+      description: Data de referência para filtro incremental (movimentos/documentos).
+      schema: { type: string, format: date }
+    IdDocumento:
+      name: id_documento
+      in: query
+      required: true
+      description: Identificador do documento no processo.
+      schema: { type: string }
+  responses:
+    Erro400:
+      description: Requisição inválida (parâmetro obrigatório ausente).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+          example: { error: "Tribunal não informado" }
+    Erro401:
+      description: Token inválido ou não fornecido.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErroMensagem' }
+          example: { message: "Token inválido ou não fornecido" }
+    Erro422:
+      description: Falha de validação (ex. login_pje/senha_pje ausentes).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+          example:
+            message: "The login pje field is required."
+            errors: { login_pje: ["The login pje field is required."] }
+    Erro500:
+      description: Erro interno / exceção MNI.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
