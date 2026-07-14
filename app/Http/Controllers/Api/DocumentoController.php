@@ -51,6 +51,8 @@ class DocumentoController extends Controller
                         'documento' => $documento
                     ]);
                 }
+
+                $tentativa++;
             } while ($tentativa < $maxTentativas);
 
             return response()->json([

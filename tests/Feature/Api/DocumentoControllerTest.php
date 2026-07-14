@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\DocumentoController;
 use App\Jobs\ConsultarDocumentosProcessoMNIJob;
 use App\Models\Processo;
 use App\Models\ProcessoDocumento;
@@ -201,4 +202,27 @@ it('visualizar re-hidrata via auto-correcao quando o objeto sumiu do S3 mas o MN
 
     // invariante central da feature: a coluna no banco permanece vazia
     expect(\App\Models\ProcessoDocumento::where('id_documento', 930005)->value('conteudo_html'))->toBeNull();
+});
+
+it('show retorna 404 apos maxTentativas quando o documento nunca resolve link (sem loop infinito)', function () {
+    // getDocumento sempre retorna null (documento sem link). A valvula de seguranca
+    // estoura se chamado vezes demais, provando que o do-while termina em vez de loopar.
+    $chamadas = 0;
+    $this->partialMock(DocumentoController::class, function ($mock) use (&$chamadas) {
+        $mock->shouldReceive('getDocumento')->andReturnUsing(function () use (&$chamadas) {
+            $chamadas++;
+            if ($chamadas > 10) {
+                throw new \RuntimeException('getDocumento chamado vezes demais — provavel loop infinito');
+            }
+
+            return null;
+        });
+    });
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/documento/visualizar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&id_documento=456&login_pje=u&senha_pje=s')
+        ->assertStatus(404)
+        ->assertJsonPath('message', fn ($m) => str_contains($m, 'apos 3 tentativas') || str_contains($m, 'após 3 tentativas'));
+
+    expect($chamadas)->toBe(3);
 });
