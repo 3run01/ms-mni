@@ -10,9 +10,10 @@ info:
     Todas as rotas exigem o header `X-API-Token` com um token válido.
 
     ## Aviso de segurança
-    Os endpoints `GET` recebem `login_pje` e `senha_pje` como **query params**.
-    Isso expõe credenciais PJe na URL (logs de servidor, histórico de proxy).
-    **Não registre em log as URLs completas destas requisições.**
+    Os endpoints de consulta de processo e documento recebem `login_pje` e
+    `senha_pje` como **query params**. Isso expõe credenciais PJe na URL (logs
+    de servidor, histórico de proxy). **Não registre em log as URLs completas
+    destas requisições.**
 servers:
   - url: https://{host}/api
     description: Servidor da aplicação
@@ -134,7 +135,7 @@ paths:
               schema: { $ref: '#/components/schemas/Processo' }
         '401': { $ref: '#/components/responses/Erro401' }
         '422': { $ref: '#/components/responses/Erro422' }
-        '500': { $ref: '#/components/responses/Erro500' }
+        '500': { $ref: '#/components/responses/Erro500Generico' }
   /processo/movimentos/listar:
     get:
       tags: [Processos]
@@ -156,7 +157,7 @@ paths:
                 items: { $ref: '#/components/schemas/Movimento' }
         '401': { $ref: '#/components/responses/Erro401' }
         '422': { $ref: '#/components/responses/Erro422' }
-        '500': { $ref: '#/components/responses/Erro500' }
+        '500': { $ref: '#/components/responses/Erro500Generico' }
   /processo/documentos/listar:
     get:
       tags: [Documentos]
@@ -178,7 +179,7 @@ paths:
                 items: { $ref: '#/components/schemas/Documento' }
         '401': { $ref: '#/components/responses/Erro401' }
         '422': { $ref: '#/components/responses/Erro422' }
-        '500': { $ref: '#/components/responses/Erro500' }
+        '500': { $ref: '#/components/responses/Erro500Generico' }
   /processo/consultar/dados-basicos/async:
     get:
       tags: [Processos]
@@ -305,26 +306,48 @@ webhooks:
       summary: Notificação de conclusão da exportação (ms-mni → cliente SIM)
       description: |
         O ms-mni faz `POST {SIM_URL}/webhook/download` ao concluir (ou falhar) a
-        geração do PDF. O cliente SIM implementa este endpoint. Payload tipado por
-        status.
+        geração do PDF. A requisição é enviada com o header `X-API-Token`
+        (valor de `config('services.sim_webhook_download.token')`), que o
+        cliente SIM deve validar. O cliente SIM implementa este endpoint.
+        Payload tipado por status.
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              required: [status, user_id, titulo]
+              required: [user_id, titulo, formato, status]
               properties:
+                user_id: { type: integer, description: "Eco do user_id informado em /processo/download." }
+                titulo: { type: string, description: "Eco do titulo informado em /processo/download." }
+                formato: { type: string, example: "pdf" }
                 status: { type: string, enum: [concluido, falhou] }
-                user_id: { type: integer }
-                titulo: { type: string }
-                exportacao_id: { type: integer }
-                arquivo_url:
-                  type: [string, 'null']
-                  format: uri
-                  description: "Presente em status=concluido. PDF em downloads/{user_id}/{uuid}.pdf."
-                erro:
-                  type: [string, 'null']
-                  description: "Presente em status=falhou."
+                s3_path:
+                  type: string
+                  description: "Chave relativa no S3 (downloads/{user_id}/{uuid}.pdf). Presente quando status=concluido."
+                tamanho_bytes:
+                  type: integer
+                  description: "Tamanho do PDF em bytes. Presente quando status=concluido."
+                erro_resumo:
+                  type: string
+                  description: "Resumo do erro. Presente quando status=falhou."
+            examples:
+              concluido:
+                summary: Exportação concluída
+                value:
+                  user_id: 42
+                  titulo: "Processo 0001234-56.2024.8.26.0100"
+                  formato: pdf
+                  status: concluido
+                  s3_path: "downloads/42/9f2c9b1a-1e3a-4d3a-8b7a-2f6f1c9a0b1c.pdf"
+                  tamanho_bytes: 184320
+              falhou:
+                summary: Exportação falhou
+                value:
+                  user_id: 42
+                  titulo: "Processo 0001234-56.2024.8.26.0100"
+                  formato: pdf
+                  status: falhou
+                  erro_resumo: "Nenhum documento encontrado para o processo informado com os filtros aplicados."
       responses:
         '200': { description: Webhook recebido pelo cliente. }
 components:
@@ -393,6 +416,12 @@ components:
           oneOf:
             - type: boolean
             - type: "null"
+        url_webservice_mni_consultar_processo:
+          type: [string, 'null']
+          description: "URL do webservice MNI usado para consulta de processos."
+        url_webservice_mni_criminal:
+          type: [string, 'null']
+          description: "URL do webservice MNI usado para dados criminais (SEEU)."
     ProcessoParte:
       type: object
       properties:
@@ -701,3 +730,8 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Erro' }
+    Erro500Generico:
+      description: Erro interno.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErroMensagem' }
