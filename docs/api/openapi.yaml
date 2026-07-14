@@ -28,7 +28,40 @@ tags:
     description: Consulta e download de documentos
   - name: Tribunais
     description: Listagem de tribunais
-paths: {}
+paths:
+  /tribunais:
+    get:
+      tags: [Tribunais]
+      summary: Listar tribunais ativos
+      description: Retorna todos os tribunais com `ativo = true`.
+      responses:
+        '200':
+          description: Lista de tribunais.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Tribunal' }
+        '401': { $ref: '#/components/responses/Erro401' }
+  /tribunais/{uuid}:
+    get:
+      tags: [Tribunais]
+      summary: Obter tribunal por uuid
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Tribunal encontrado (ou `null` se não existir).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Tribunal' }
+                  - { type: 'null' }
+        '401': { $ref: '#/components/responses/Erro401' }
 components:
   securitySchemes:
     ApiToken:
