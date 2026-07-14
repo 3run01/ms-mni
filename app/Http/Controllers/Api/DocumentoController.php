@@ -67,17 +67,14 @@ class DocumentoController extends Controller
 
     public function getDocumento($id_documento, $numero_processo, $tribunal, $login_pje = null, $senha_pje = null)
     {
-
-
         try {
             $service = new SalvarDocumentoProcessoService();
             $documento = $this->vericarExistenciaDocumento($id_documento, $numero_processo, $tribunal, $login_pje, $senha_pje);
 
-            //verifica se o documento existe e se estar sem conteudo html
-            if (empty($documento->conteudo_html)) {
+            // baixa o documento caso ainda nao tenha conteudo html (coluna legado ou path_html)
+            if (!$documento->temConteudoHtml()) {
                 $documento = $service->baixarDocumento($documento, $login_pje, $senha_pje);
             }
-
 
             // Se o documento já estiver baixado e existir no S3, apenas gera o link
             if ($documento->status == ProcessoDocumento::STATUS_BAIXADO && Storage::disk('s3')->exists($documento->path)) {
@@ -87,14 +84,13 @@ class DocumentoController extends Controller
                         now()->addMinutes(60)
                     );
 
-                    return $documento;
+                    return $this->anexarConteudoHtml($service, $documento, $login_pje, $senha_pje);
                 } catch (\Exception $e) {
                     Log::error('Erro ao gerar link temporário para documento: ' . $e->getMessage(), [
                         'trace' => $e->getTraceAsString()
                     ]);
                 }
             }
-
 
             $documento = $service->baixarDocumento(
                 $documento,
@@ -110,7 +106,7 @@ class DocumentoController extends Controller
                         now()->addMinutes(60)
                     );
 
-                    return $documento;
+                    return $this->anexarConteudoHtml($service, $documento, $login_pje, $senha_pje);
                 } catch (\Exception $e) {
                     Log::error('Erro ao gerar link temporário para documento após download: ' . $e->getMessage(), [
                         'trace' => $e->getTraceAsString()
@@ -127,6 +123,33 @@ class DocumentoController extends Controller
             Log::error('Erro ao obter documento: ' . $e->getMessage());
             throw new MNIException($e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Anexa o conteudo HTML ao documento apenas para a resposta (nada é persistido).
+     * Se um documento HTML ficou sem conteudo recuperavel (objeto sumiu do S3),
+     * tenta a auto-correcao re-executando o downloadHTML uma vez.
+     */
+    private function anexarConteudoHtml(SalvarDocumentoProcessoService $service, ProcessoDocumento $documento, $login_pje = null, $senha_pje = null): ProcessoDocumento
+    {
+        $conteudo = $service->obterConteudoHtml($documento);
+
+        if ($conteudo === null && $documento->mimetype === 'text/html') {
+            try {
+                $service->downloadHTML($documento, $login_pje, $senha_pje);
+                $conteudo = $service->obterConteudoHtml($documento);
+            } catch (\Exception $e) {
+                Log::error('Erro ao recuperar conteudo HTML do documento', [
+                    'documento_id' => $documento->id_documento,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $documento->conteudo_html = $conteudo;
+        $documento->makeVisible('conteudo_html');
+
+        return $documento;
     }
 
     public function vericarExistenciaDocumento($id_documento, $numero_processo, $tribunal, $login_pje = null, $senha_pje = null)
