@@ -125,6 +125,9 @@ it('visualizar hidrata conteudo_html do S3 para documento novo', function () {
         ->assertJsonPath('documento.link', "https://s3.fake/documentos-processos/{$numero}/930001.pdf")
         ->assertJsonMissingPath('documento.path_html')
         ->assertJsonMissingPath('documento.path');
+
+    // invariante central: a hidratacao do S3 nunca repopula a coluna no banco
+    expect(\App\Models\ProcessoDocumento::where('id_documento', 930001)->value('conteudo_html'))->toBeNull();
 });
 
 it('visualizar serve conteudo_html da coluna para documento legado', function () {
@@ -172,4 +175,30 @@ it('visualizar responde conteudo_html nulo quando objeto sumiu do S3 e a auto-co
         ->assertJson(fn (AssertableJson $json) => $json
             ->where('documento.conteudo_html', null)
             ->etc());
+});
+
+it('visualizar re-hidrata via auto-correcao quando o objeto sumiu do S3 mas o MNI responde', function () {
+    fakeS3ComLinks();
+    $numero = 'VIS' . getmypid() . 'E';
+    $html = '<html><body>Recuperado via auto-correcao</body></html>';
+    criarDocumentoVisualizar($numero, 930005, [
+        'path_html' => "documentos-processos/{$numero}/930005.html",
+    ]);
+    // PDF existe (para gerar o link), mas o .html sumiu do S3 => dispara a auto-correcao
+    Storage::disk('s3')->put("documentos-processos/{$numero}/930005.pdf", 'pdf-fake');
+
+    // Mocka apenas a chamada MNI; o resto do downloadHTML roda de verdade
+    $this->partialMock(\App\Services\Processo\SalvarDocumentoProcessoService::class, function ($mock) use ($html) {
+        $mock->shouldReceive('consultarDocumento')
+            ->andReturn((object) ['conteudo' => base64_encode($html)]);
+    });
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson("/api/documento/visualizar?tribunal_id=999999&numero_processo={$numero}&id_documento=930005&login_pje=u&senha_pje=s")
+        ->assertOk()
+        ->assertJsonPath('documento.conteudo_html', $html)
+        ->assertJsonPath('documento.link', "https://s3.fake/documentos-processos/{$numero}/930005.pdf");
+
+    // invariante central da feature: a coluna no banco permanece vazia
+    expect(\App\Models\ProcessoDocumento::where('id_documento', 930005)->value('conteudo_html'))->toBeNull();
 });

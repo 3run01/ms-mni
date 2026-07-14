@@ -68,7 +68,7 @@ class DocumentoController extends Controller
     public function getDocumento($id_documento, $numero_processo, $tribunal, $login_pje = null, $senha_pje = null)
     {
         try {
-            $service = new SalvarDocumentoProcessoService();
+            $service = app(SalvarDocumentoProcessoService::class);
             $documento = $this->vericarExistenciaDocumento($id_documento, $numero_processo, $tribunal, $login_pje, $senha_pje);
 
             // baixa o documento caso ainda nao tenha conteudo html (coluna legado ou path_html)
@@ -136,8 +136,14 @@ class DocumentoController extends Controller
 
         if ($conteudo === null && $documento->mimetype === 'text/html') {
             try {
-                $service->downloadHTML($documento, $login_pje, $senha_pje);
-                $conteudo = $service->obterConteudoHtml($documento);
+                // Auto-correcao numa instancia limpa: o $documento carrega o atributo
+                // transitorio `link` (nao e coluna), e um save() dele quebraria.
+                $documentoLimpo = $documento->fresh();
+
+                if ($documentoLimpo) {
+                    $service->downloadHTML($documentoLimpo, $login_pje, $senha_pje);
+                    $conteudo = $service->obterConteudoHtml($documentoLimpo);
+                }
             } catch (\Exception $e) {
                 Log::error('Erro ao recuperar conteudo HTML do documento', [
                     'documento_id' => $documento->id_documento,
