@@ -1,0 +1,38 @@
+openapi: 3.1.0
+info:
+  title: API MNI/PJe — ms-mni
+  version: "1.0.0"
+  description: |
+    API REST externa do ms-mni para consulta de processos, documentos e
+    tribunais via integração MNI/PJe.
+
+    ## Autenticação
+    Todas as rotas exigem o header `X-API-Token` com um token válido.
+
+    ## Aviso de segurança
+    Os endpoints `GET` recebem `login_pje` e `senha_pje` como **query params**.
+    Isso expõe credenciais PJe na URL (logs de servidor, histórico de proxy).
+    **Não registre em log as URLs completas destas requisições.**
+servers:
+  - url: https://{host}/api
+    description: Servidor da aplicação
+    variables:
+      host:
+        default: localhost:8006
+security:
+  - ApiToken: []
+tags:
+  - name: Processos
+    description: Consulta e exportação de processos
+  - name: Documentos
+    description: Consulta e download de documentos
+  - name: Tribunais
+    description: Listagem de tribunais
+paths: {}
+components:
+  securitySchemes:
+    ApiToken:
+      type: apiKey
+      in: header
+      name: X-API-Token
+      description: Token de API emitido pelo ms-mni.
