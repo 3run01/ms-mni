@@ -221,6 +221,42 @@ paths:
         '200': { description: Job enfileirado. Corpo vazio. }
         '401': { $ref: '#/components/responses/Erro401' }
         '422': { $ref: '#/components/responses/Erro422' }
+  /documento/visualizar:
+    get:
+      tags: [Documentos]
+      summary: Baixar documento e obter link temporário
+      description: |
+        Baixa o documento (até 3 tentativas) e retorna um link temporário do
+        S3, válido por 60 minutos, em `documento.link`.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - { $ref: '#/components/parameters/IdDocumento' }
+      responses:
+        '200':
+          description: Documento consultado com sucesso.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Documento 12345 consultado com sucesso" }
+                  documento: { $ref: '#/components/schemas/Documento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404':
+          description: Documento não obtido após as tentativas.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
+              example: { message: "Não foi possível obter o documento 12345 do processo ... após 3 tentativas" }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500':
+          description: Erro interno.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
 components:
   securitySchemes:
     ApiToken:
