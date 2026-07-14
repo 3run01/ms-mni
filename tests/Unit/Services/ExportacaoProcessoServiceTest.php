@@ -46,6 +46,8 @@ it('criar() cria registro com status enfileirado e filtros serializados', functi
         'periodo_final' => null,
         'id_inicial' => null,
         'id_final' => null,
+        'callback_url' => 'https://example.com/webhook',
+        'callback_token' => 'tok',
     ]);
 
     expect($exportacao->user_id)->toBe(42);
