@@ -12,6 +12,17 @@ Route::get('/', function () {
     return redirect()->route('login');
 });
 
+// Documentação da API (OpenAPI/Redoc) — pública
+Route::get('/docs/api', function () {
+    return view('docs.api');
+})->name('docs.api');
+
+Route::get('/docs/api/openapi.yaml', function () {
+    return response()->file(base_path('docs/api/openapi.yaml'), [
+        'Content-Type' => 'application/yaml',
+    ]);
+})->name('docs.api.spec');
+
 // Rotas de autenticação
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
