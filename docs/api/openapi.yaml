@@ -135,6 +135,92 @@ paths:
         '401': { $ref: '#/components/responses/Erro401' }
         '422': { $ref: '#/components/responses/Erro422' }
         '500': { $ref: '#/components/responses/Erro500' }
+  /processo/movimentos/listar:
+    get:
+      tags: [Processos]
+      summary: Listar movimentos (síncrono)
+      description: Retorna do banco se houver movimentos; senão consulta o MNI.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - { $ref: '#/components/parameters/DataReferencia' }
+      responses:
+        '200':
+          description: Lista de movimentos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Movimento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500' }
+  /processo/documentos/listar:
+    get:
+      tags: [Documentos]
+      summary: Listar documentos (síncrono)
+      description: Retorna do banco se houver documentos; senão consulta o MNI. O campo `tipo` é resolvido.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - { $ref: '#/components/parameters/DataReferencia' }
+      responses:
+        '200':
+          description: Lista de documentos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Documento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500' }
+  /processo/consultar/dados-basicos/async:
+    get:
+      tags: [Processos]
+      summary: Enfileirar consulta de dados básicos (assíncrono)
+      description: Enfileira `ConsultarDadosBasicosProcessoMNIJob` na fila `alta`. Retorna 200 com corpo vazio.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+      responses:
+        '200': { description: Job enfileirado. Corpo vazio. }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+  /processo/consultar/movimentos/async:
+    get:
+      tags: [Processos]
+      summary: Enfileirar consulta de movimentos (assíncrono)
+      description: Enfileira `ConsultarMovimentosProcessoMNIJob` na fila `alta`. Retorna 200 com corpo vazio.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+      responses:
+        '200': { description: Job enfileirado. Corpo vazio. }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+  /processo/consultar/documentos/async:
+    get:
+      tags: [Documentos]
+      summary: Enfileirar consulta de documentos (assíncrono)
+      description: Enfileira `ConsultarDocumentosProcessoMNIJob` na fila `alta`. Retorna 200 com corpo vazio.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+      responses:
+        '200': { description: Job enfileirado. Corpo vazio. }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
 components:
   securitySchemes:
     ApiToken:
