@@ -199,6 +199,31 @@ class SalvarDocumentoProcessoService
         }
     }
 
+    public function obterConteudoHtml(ProcessoDocumento $documento): ?string
+    {
+        if (!empty($documento->conteudo_html)) {
+            return $documento->conteudo_html;
+        }
+
+        if (empty($documento->path_html)) {
+            return null;
+        }
+
+        try {
+            $conteudo = Storage::disk('s3')->get($documento->path_html);
+
+            return ($conteudo === null || $conteudo === '') ? null : $conteudo;
+        } catch (\Exception $e) {
+            Log::error('Erro ao ler conteudo HTML do S3', [
+                'documento_id' => $documento->id_documento,
+                'path_html' => $documento->path_html,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
     public function downloadPDF($documento, $login_pje = null, $senha_pje = null)
     {
         try {

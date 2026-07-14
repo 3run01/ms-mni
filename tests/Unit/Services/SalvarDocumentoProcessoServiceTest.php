@@ -65,6 +65,52 @@ it('baixarDocumento re-baixa html quando documento baixado nao tem coluna nem pa
     expect($resultado->id)->toBe($documento->id);
 });
 
+it('obterConteudoHtml retorna a coluna quando preenchida (legado), sem tocar o S3', function () {
+    Storage::fake('s3');
+    $documento = criarDocumentoHtml(['id_documento' => 920004]);
+    ProcessoDocumento::where('id', $documento->id)
+        ->update(['conteudo_html' => '<html><body>Legado</body></html>']);
+    $documento->refresh();
+
+    $service = new SalvarDocumentoProcessoService();
+
+    expect($service->obterConteudoHtml($documento))->toBe('<html><body>Legado</body></html>');
+});
+
+it('obterConteudoHtml le do S3 via path_html quando a coluna esta vazia', function () {
+    Storage::fake('s3');
+    $documento = criarDocumentoHtml([
+        'id_documento' => 920005,
+        'path_html' => 'documentos-processos/x/920005.html',
+    ]);
+    Storage::disk('s3')->put('documentos-processos/x/920005.html', '<html><body>Novo</body></html>');
+
+    $service = new SalvarDocumentoProcessoService();
+
+    expect($service->obterConteudoHtml($documento))->toBe('<html><body>Novo</body></html>');
+});
+
+it('obterConteudoHtml retorna null quando path_html aponta para objeto inexistente', function () {
+    Storage::fake('s3');
+    $documento = criarDocumentoHtml([
+        'id_documento' => 920006,
+        'path_html' => 'documentos-processos/x/920006.html',
+    ]);
+
+    $service = new SalvarDocumentoProcessoService();
+
+    expect($service->obterConteudoHtml($documento))->toBeNull();
+});
+
+it('obterConteudoHtml retorna null sem coluna e sem path_html', function () {
+    Storage::fake('s3');
+    $documento = criarDocumentoHtml(['id_documento' => 920007]);
+
+    $service = new SalvarDocumentoProcessoService();
+
+    expect($service->obterConteudoHtml($documento))->toBeNull();
+});
+
 it('baixarDocumento NAO re-baixa html quando documento baixado ja tem path_html', function () {
     Storage::fake('s3');
     $documento = criarDocumentoHtml([
