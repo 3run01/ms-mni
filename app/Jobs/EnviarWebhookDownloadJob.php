@@ -3,11 +3,12 @@
 namespace App\Jobs;
 
 use App\Models\ProcessoExportacao;
-use App\Services\Exportacao\WebhookDownloadClient;
-use App\Services\Exportacao\WebhookPermanentException;
+use App\Services\Callback\CallbackNotifier;
+use App\Services\Callback\CallbackPermanentException;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class EnviarWebhookDownloadJob implements ShouldQueue
 {
@@ -22,19 +23,16 @@ class EnviarWebhookDownloadJob implements ShouldQueue
         return [10, 60, 300, 900, 3600];
     }
 
-    public function handle(WebhookDownloadClient $client): void
+    public function handle(CallbackNotifier $notifier): void
     {
         $exportacao = \DB::transaction(function () {
-            $exportacao = ProcessoExportacao::query()
-                ->lockForUpdate()
-                ->find($this->exportacaoId);
+            $exportacao = ProcessoExportacao::query()->lockForUpdate()->find($this->exportacaoId);
 
-            if (!$exportacao) {
+            if (! $exportacao) {
                 return null;
             }
-
             if ($exportacao->jaFoiNotificado()) {
-                return false; // sentinel: idempotency hit
+                return false;
             }
 
             $exportacao->increment('webhook_tentativas');
@@ -42,18 +40,17 @@ class EnviarWebhookDownloadJob implements ShouldQueue
         });
 
         if ($exportacao === null) {
-            Log::warning("[Exportacao:{$this->exportacaoId}] não encontrada ao enviar webhook");
+            Log::warning("[Exportacao:{$this->exportacaoId}] não encontrada ao enviar callback");
             return;
         }
-
         if ($exportacao === false) {
             return;
         }
 
         try {
-            $client->notificar($exportacao);
-        } catch (WebhookPermanentException $e) {
-            Log::critical("[Exportacao:{$exportacao->id}] webhook rejeitado pelo SIM (permanente)", [
+            $notifier->notificar($exportacao->callback_url, $exportacao->callback_token, $this->montarPayload($exportacao));
+        } catch (CallbackPermanentException $e) {
+            Log::critical("[Exportacao:{$exportacao->id}] callback rejeitado (permanente)", [
                 'status' => $e->statusCode,
                 'mensagem' => $e->getMessage(),
             ]);
@@ -61,16 +58,32 @@ class EnviarWebhookDownloadJob implements ShouldQueue
             return;
         }
 
-        // At-least-once delivery: webhook_enviado_em é setado APÓS resposta 2xx do SIM,
-        // mas o processo pode morrer entre a resposta e este update. Nesse caso o retry
-        // re-POSTa. SIM endpoint deve ser idempotente do lado dele (cf. contrato).
         $exportacao->update(['webhook_enviado_em' => now()]);
-        Log::info("[Exportacao:{$exportacao->id}] webhook enviado");
+        Log::info("[Exportacao:{$exportacao->id}] callback enviado");
+    }
+
+    private function montarPayload(ProcessoExportacao $exportacao): array
+    {
+        $base = [
+            'user_id' => $exportacao->user_id,
+            'titulo' => $exportacao->titulo,
+            'formato' => $exportacao->formato,
+            'status' => $exportacao->status,
+        ];
+
+        if ($exportacao->status === ProcessoExportacao::STATUS_CONCLUIDO) {
+            return $base + [
+                'download_url' => Storage::disk('s3')->temporaryUrl($exportacao->s3_path, now()->addMinutes(60)),
+                'tamanho_bytes' => $exportacao->tamanho_bytes,
+            ];
+        }
+
+        return $base + ['erro_resumo' => $exportacao->erro_resumo];
     }
 
     public function failed(\Throwable $e): void
     {
-        Log::critical("[Exportacao:{$this->exportacaoId}] esgotou tentativas de webhook", [
+        Log::critical("[Exportacao:{$this->exportacaoId}] esgotou tentativas de callback", [
             'erro' => $e->getMessage(),
         ]);
     }

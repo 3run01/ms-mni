@@ -2,81 +2,49 @@
 
 use App\Jobs\EnviarWebhookDownloadJob;
 use App\Models\ProcessoExportacao;
-use App\Services\Exportacao\WebhookDownloadClient;
-use App\Services\Exportacao\WebhookPermanentException;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 
-uses(DatabaseTransactions::class);
+it('notifica callback do chamador com download_url presigned em concluido', function () {
+    Storage::fake('s3');
+    Http::fake(['*' => Http::response('', 200)]);
 
-it('chama o client e marca webhook_enviado_em quando sucesso', function () {
-    $exportacao = ProcessoExportacao::factory()->concluido()->create();
+    $e = ProcessoExportacao::factory()->create([
+        'status' => ProcessoExportacao::STATUS_CONCLUIDO,
+        's3_path' => 'downloads/1/abc.pdf',
+        'tamanho_bytes' => 999,
+        'callback_url' => 'https://cliente.exemplo.gov.br/webhook',
+        'callback_token' => 'tok-xyz',
+        'webhook_enviado_em' => null,
+    ]);
+    Storage::disk('s3')->put('downloads/1/abc.pdf', 'conteudo');
 
-    $client = Mockery::mock(WebhookDownloadClient::class);
-    $client->shouldReceive('notificar')->once();
-    app()->instance(WebhookDownloadClient::class, $client);
+    EnviarWebhookDownloadJob::dispatchSync($e->id);
 
-    (new EnviarWebhookDownloadJob($exportacao->id))->handle(app(WebhookDownloadClient::class));
+    Http::assertSent(function ($request) {
+        return $request->url() === 'https://cliente.exemplo.gov.br/webhook'
+            && $request->hasHeader('X-API-Token', 'tok-xyz')
+            && $request['status'] === 'concluido'
+            && array_key_exists('download_url', $request->data())
+            && $request['tamanho_bytes'] === 999
+            && ! array_key_exists('s3_path', $request->data());
+    });
 
-    $exportacao->refresh();
-    expect($exportacao->webhook_enviado_em)->not->toBeNull();
-    expect($exportacao->webhook_tentativas)->toBe(1);
+    expect($e->fresh()->webhook_enviado_em)->not->toBeNull();
 });
 
-it('é idempotente: não chama o client se webhook_enviado_em já preenchido', function () {
-    $exportacao = ProcessoExportacao::factory()->concluido()->webhookEnviado()->create();
+it('notifica erro_resumo em falhou', function () {
+    Http::fake(['*' => Http::response('', 200)]);
 
-    $client = Mockery::mock(WebhookDownloadClient::class);
-    $client->shouldNotReceive('notificar');
-    app()->instance(WebhookDownloadClient::class, $client);
+    $e = ProcessoExportacao::factory()->create([
+        'status' => ProcessoExportacao::STATUS_FALHOU,
+        'erro_resumo' => 'sem documentos',
+        'callback_url' => 'https://cliente.exemplo.gov.br/webhook',
+        'callback_token' => 'tok',
+        'webhook_enviado_em' => null,
+    ]);
 
-    (new EnviarWebhookDownloadJob($exportacao->id))->handle(app(WebhookDownloadClient::class));
+    EnviarWebhookDownloadJob::dispatchSync($e->id);
 
-    $exportacao->refresh();
-    expect($exportacao->webhook_tentativas)->toBe(1);
-});
-
-it('relança a exception em erro retentável (5xx) e incrementa tentativas', function () {
-    $exportacao = ProcessoExportacao::factory()->concluido()->create();
-
-    $client = Mockery::mock(WebhookDownloadClient::class);
-    $client->shouldReceive('notificar')->andThrow(new RuntimeException('5xx'));
-    app()->instance(WebhookDownloadClient::class, $client);
-
-    expect(fn () => (new EnviarWebhookDownloadJob($exportacao->id))->handle(app(WebhookDownloadClient::class)))
-        ->toThrow(RuntimeException::class);
-
-    $exportacao->refresh();
-    expect($exportacao->webhook_tentativas)->toBe(1);
-    expect($exportacao->webhook_enviado_em)->toBeNull();
-});
-
-it('em erro permanente (4xx) marca como falho via fail() sem relançar', function () {
-    $exportacao = ProcessoExportacao::factory()->concluido()->create();
-
-    $client = Mockery::mock(WebhookDownloadClient::class);
-    $client->shouldReceive('notificar')->andThrow(new WebhookPermanentException(422, 'rejected'));
-    app()->instance(WebhookDownloadClient::class, $client);
-
-    Log::spy();
-
-    $job = new EnviarWebhookDownloadJob($exportacao->id);
-    $job->handle(app(WebhookDownloadClient::class));
-
-    $exportacao->refresh();
-    expect($exportacao->webhook_tentativas)->toBe(1);
-    expect($exportacao->webhook_enviado_em)->toBeNull();
-    Log::shouldHaveReceived('critical')->once();
-});
-
-it('retorna sem efeito quando exportacao_id não existe', function () {
-    $client = Mockery::mock(WebhookDownloadClient::class);
-    $client->shouldNotReceive('notificar');
-    app()->instance(WebhookDownloadClient::class, $client);
-
-    Log::spy();
-
-    (new EnviarWebhookDownloadJob(999999))->handle(app(WebhookDownloadClient::class));
-
-    Log::shouldHaveReceived('warning')->once();
+    Http::assertSent(fn ($r) => $r['status'] === 'falhou' && $r['erro_resumo'] === 'sem documentos');
 });

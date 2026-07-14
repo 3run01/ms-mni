@@ -49,7 +49,7 @@ class ExportacaoProcessoService
     }
 
     /**
-     * Marca a exportação como falhou e dispara o webhook de notificação ao SIM.
+     * Marca a exportação como falhou e dispara o callback de notificação ao chamador.
      * É chamado tanto pelo controle de erro dos jobs quanto pelo "no documents" path.
      */
     public function marcarComoFalhou(ProcessoExportacao $exportacao, string $erroResumo): void
