@@ -13,7 +13,7 @@ it('notifica callback do chamador com download_url presigned em concluido', func
         'status' => ProcessoExportacao::STATUS_CONCLUIDO,
         's3_path' => 'downloads/1/abc.pdf',
         'tamanho_bytes' => 999,
-        'callback_url' => 'https://cliente.exemplo.gov.br/webhook',
+        'callback_url' => 'https://example.com/webhook',
         'callback_token' => 'tok-xyz',
         'webhook_enviado_em' => null,
     ]);
@@ -22,7 +22,7 @@ it('notifica callback do chamador com download_url presigned em concluido', func
     EnviarWebhookDownloadJob::dispatchSync($e->id);
 
     Http::assertSent(function ($request) {
-        return $request->url() === 'https://cliente.exemplo.gov.br/webhook'
+        return $request->url() === 'https://example.com/webhook'
             && $request->hasHeader('X-API-Token', 'tok-xyz')
             && $request['status'] === 'concluido'
             && array_key_exists('download_url', $request->data())
@@ -39,7 +39,7 @@ it('notifica erro_resumo em falhou', function () {
     $e = ProcessoExportacao::factory()->create([
         'status' => ProcessoExportacao::STATUS_FALHOU,
         'erro_resumo' => 'sem documentos',
-        'callback_url' => 'https://cliente.exemplo.gov.br/webhook',
+        'callback_url' => 'https://example.com/webhook',
         'callback_token' => 'tok',
         'webhook_enviado_em' => null,
     ]);
