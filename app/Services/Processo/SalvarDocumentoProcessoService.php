@@ -156,40 +156,46 @@ class SalvarDocumentoProcessoService
             $pdf = Pdf::loadHTML($conteudoDecodificado);
             $pasta = "documentos-processos";
             $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".pdf";
+            $filenameHtml = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".html";
 
-            // Tenta salvar o arquivo algumas vezes
-            $maxTentativas = 3;
-            $tentativa = 0;
-            $sucesso = false;
+            $this->putComRetry($filename, $pdf->output(), 'PDF');
+            $this->putComRetry($filenameHtml, $conteudoDecodificado, 'HTML');
 
-            while (!$sucesso && $tentativa < $maxTentativas) {
-                try {
-                    $sucesso = Storage::disk('s3')->put($filename, $pdf->output());
-                    if (!$sucesso) {
-                        $tentativa++;
-                        if ($tentativa < $maxTentativas) {
-                            sleep(1);
-                        }
-                    }
-                } catch (\Exception $e) {
-                    $tentativa++;
-                    if ($tentativa >= $maxTentativas) {
-                        throw $e;
-                    }
-                    sleep(1);
-                }
-            }
-
-            if (!$sucesso) {
-                throw new \Exception('Erro ao salvar o PDF no S3 após ' . $maxTentativas . ' tentativas');
-            }
-
-            $documento->conteudo_html = $conteudoDecodificado;
+            $documento->path_html = $filenameHtml;
             $documento->save();
 
             return $filename;
         } catch (\Exception $e) {
             throw new \Exception('Erro ao processar documento HTML: ' . $e->getMessage());
+        }
+    }
+
+    private function putComRetry(string $path, string $conteudo, string $rotulo): void
+    {
+        $maxTentativas = 3;
+        $tentativa = 0;
+        $sucesso = false;
+
+        while (!$sucesso && $tentativa < $maxTentativas) {
+            try {
+                $sucesso = Storage::disk('s3')->put($path, $conteudo);
+                if (!$sucesso) {
+                    $tentativa++;
+                    if ($tentativa < $maxTentativas) {
+                        sleep(1);
+                    }
+                }
+            } catch (\Exception $e) {
+                $tentativa++;
+                if ($tentativa >= $maxTentativas) {
+                    throw $e;
+                }
+                sleep(1);
+            }
+        }
+
+        if (!$sucesso) {
+            throw new \Exception('Erro ao salvar o ' . $rotulo . ' no S3 após ' . $maxTentativas . ' tentativas');
         }
     }
 
