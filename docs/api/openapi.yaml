@@ -59,6 +59,279 @@ components:
           type: string
           example: "Token inválido ou não fornecido"
       required: [message]
+    Tribunal:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        uuid: { type: string, format: uuid }
+        nome: { type: string, example: "TJSP" }
+        tipo: { type: string, example: "Tribunal de Justiça" }
+        ativo: { type: boolean, example: true }
+        versao_mni:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_peticao_inicial:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_peticao_avulsa:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_certidao_inicio_fim:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_seeu:
+          oneOf:
+            - type: string
+            - type: "null"
+        usar_codigo_documento_padrao:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        enviar_dados_criminais:
+          oneOf:
+            - type: boolean
+            - type: "null"
+    ProcessoParte:
+      type: object
+      properties:
+        nome: { type: string, example: "Fulano de Tal" }
+        cpf_cnpj:
+          oneOf:
+            - type: string
+              example: "12345678900"
+            - type: "null"
+        polo:
+          oneOf:
+            - type: string
+              example: "AT"
+            - type: "null"
+        cep:
+          oneOf:
+            - type: string
+            - type: "null"
+        logradouro:
+          oneOf:
+            - type: string
+            - type: "null"
+        numero:
+          oneOf:
+            - type: string
+            - type: "null"
+        bairro:
+          oneOf:
+            - type: string
+            - type: "null"
+        municipio:
+          oneOf:
+            - type: string
+            - type: "null"
+        estado:
+          oneOf:
+            - type: string
+            - type: "null"
+        representantes_processual:
+          type: array
+          items: { type: object }
+    Movimento:
+      type: object
+      properties:
+        identificador_movimento:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_nacional:
+          oneOf:
+            - type: string
+            - type: "null"
+        complemento:
+          oneOf:
+            - type: string
+            - type: "null"
+        data_hora:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        id_documento_vinculado:
+          oneOf:
+            - type: string
+            - type: "null"
+    Documento:
+      type: object
+      properties:
+        id_documento: { type: integer, example: 12345 }
+        id_documento_vinculado:
+          oneOf:
+            - type: integer
+            - type: "null"
+        tipo_documento:
+          oneOf:
+            - type: string
+            - type: "null"
+        tipo:
+          oneOf:
+            - type: string
+              description: "Descrição do tipo, resolvida em /processo/documentos/listar."
+            - type: "null"
+        descricao:
+          oneOf:
+            - type: string
+            - type: "null"
+        movimento:
+          oneOf:
+            - type: string
+            - type: "null"
+        data_hora:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        data_juntada:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        usuario_juntada_arquivo:
+          oneOf:
+            - type: string
+            - type: "null"
+        mimetype:
+          oneOf:
+            - type: string
+            - type: "null"
+        hash:
+          oneOf:
+            - type: string
+            - type: "null"
+        nivel_sigilo:
+          oneOf:
+            - type: integer
+            - type: "null"
+        status:
+          oneOf:
+            - type: string
+              enum: [baixado, pendente, erro]
+            - type: "null"
+        file_size:
+          oneOf:
+            - type: integer
+            - type: "null"
+        link:
+          oneOf:
+            - type: string
+              format: uri
+              description: "URL temporária S3 (validade 60 min), presente apenas em /documento/visualizar."
+            - type: "null"
+    Processo:
+      type: object
+      description: |
+        Processo com relações. As relações presentes variam por endpoint.
+        Campos ocultos do model (id, tribunal_id, payload_envio, etc.) não aparecem.
+      properties:
+        numero_processo: { type: string }
+        jurisdicao_codigo:
+          oneOf:
+            - type: string
+            - type: "null"
+        classe_codigo:
+          oneOf:
+            - type: string
+            - type: "null"
+        assunto_codigo:
+          oneOf:
+            - type: string
+            - type: "null"
+        competencia_codigo:
+          oneOf:
+            - type: string
+            - type: "null"
+        valor_causa:
+          oneOf:
+            - type: string
+            - type: "null"
+        nivel_sigilo:
+          oneOf:
+            - type: integer
+            - type: "null"
+        status:
+          oneOf:
+            - type: string
+            - type: "null"
+        justica_gratuita:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        pedido_liminar:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        nome_orgao_julgador:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_orgao_julgador:
+          oneOf:
+            - type: string
+            - type: "null"
+        instancia_orgao_julgador:
+          oneOf:
+            - type: string
+            - type: "null"
+        tribunal: { $ref: '#/components/schemas/Tribunal' }
+        classe:
+          oneOf:
+            - type: object
+            - type: "null"
+        assuntos: { type: array, items: { type: object } }
+        prioridades: { type: array, items: { type: object } }
+        partes:
+          type: array
+          items: { $ref: '#/components/schemas/ProcessoParte' }
+        movimentos:
+          type: array
+          items: { $ref: '#/components/schemas/Movimento' }
+        documentos:
+          type: array
+          items: { $ref: '#/components/schemas/Documento' }
+    PaginacaoProcessos:
+      type: object
+      description: Envelope padrão do paginate() do Laravel.
+      properties:
+        current_page: { type: integer, example: 1 }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Processo' }
+        first_page_url: { type: string }
+        from:
+          oneOf:
+            - type: integer
+            - type: "null"
+        last_page: { type: integer, example: 1 }
+        last_page_url: { type: string }
+        next_page_url:
+          oneOf:
+            - type: string
+            - type: "null"
+        path: { type: string }
+        per_page: { type: integer, example: 10 }
+        prev_page_url:
+          oneOf:
+            - type: string
+            - type: "null"
+        to:
+          oneOf:
+            - type: integer
+            - type: "null"
+        total: { type: integer, example: 1 }
+    ExportacaoEnfileirada:
+      type: object
+      properties:
+        message: { type: string, example: "Exportação enfileirada" }
+        exportacao_id: { type: integer, example: 42 }
   parameters:
     LoginPje:
       name: login_pje
