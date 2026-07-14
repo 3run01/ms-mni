@@ -185,6 +185,16 @@ paths:
         - { $ref: '#/components/parameters/SenhaPje' }
         - { $ref: '#/components/parameters/TribunalIdQuery' }
         - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - name: callback_url
+          in: query
+          required: true
+          description: "URL https de callback (bloqueia IPs internos)."
+          schema: { type: string, format: uri }
+        - name: callback_token
+          in: query
+          required: true
+          description: "Token reenviado no header X-API-Token do callback."
+          schema: { type: string }
       responses:
         '200': { description: Job enfileirado. Corpo vazio. }
         '401': { $ref: '#/components/responses/Erro401' }
@@ -199,6 +209,16 @@ paths:
         - { $ref: '#/components/parameters/SenhaPje' }
         - { $ref: '#/components/parameters/TribunalIdQuery' }
         - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - name: callback_url
+          in: query
+          required: true
+          description: "URL https de callback (bloqueia IPs internos)."
+          schema: { type: string, format: uri }
+        - name: callback_token
+          in: query
+          required: true
+          description: "Token reenviado no header X-API-Token do callback."
+          schema: { type: string }
       responses:
         '200': { description: Job enfileirado. Corpo vazio. }
         '401': { $ref: '#/components/responses/Erro401' }
@@ -213,6 +233,16 @@ paths:
         - { $ref: '#/components/parameters/SenhaPje' }
         - { $ref: '#/components/parameters/TribunalIdQuery' }
         - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - name: callback_url
+          in: query
+          required: true
+          description: "URL https de callback (bloqueia IPs internos)."
+          schema: { type: string, format: uri }
+        - name: callback_token
+          in: query
+          required: true
+          description: "Token reenviado no header X-API-Token do callback."
+          schema: { type: string }
       responses:
         '200': { description: Job enfileirado. Corpo vazio. }
         '401': { $ref: '#/components/responses/Erro401' }
@@ -267,7 +297,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [numero_processo, user_id, titulo, formato]
+              required: [numero_processo, user_id, titulo, formato, callback_url, callback_token]
               properties:
                 numero_processo: { type: string, maxLength: 25 }
                 tribunal_id: { type: [integer, 'null'] }
@@ -281,6 +311,13 @@ paths:
                 periodo_final: { type: string, format: date, description: "required_with periodo_inicial" }
                 id_inicial: { type: integer, description: "required_with id_final" }
                 id_final: { type: integer, description: "required_with id_inicial" }
+                callback_url:
+                  type: string
+                  format: uri
+                  description: "URL https do chamador que receberá a notificação de conclusão. Bloqueia IPs internos."
+                callback_token:
+                  type: string
+                  description: "Token reenviado no header X-API-Token da chamada de callback, para o chamador validar a origem."
       responses:
         '200':
           description: Exportação enfileirada.
@@ -298,12 +335,11 @@ paths:
 webhooks:
   download:
     post:
-      summary: Notificação de conclusão da exportação (ms-mni → cliente SIM)
-      description: |
-        O ms-mni faz `POST {SIM_URL}/webhook/download` ao concluir (ou falhar) a
-        geração do PDF. A requisição é enviada com o header `X-API-Token`
-        (valor de `config('services.sim_webhook_download.token')`), que o
-        cliente SIM deve validar. O cliente SIM implementa este endpoint.
+      summary: Notificação de conclusão da exportação
+      description: >
+        Ao concluir (ou falhar) a exportação, o ms-mni faz `POST {callback_url}`
+        (a URL informada na requisição de download), com header
+        `X-API-Token: {callback_token}`. O chamador implementa este endpoint.
         Payload tipado por status.
       requestBody:
         content:
@@ -316,9 +352,10 @@ webhooks:
                 titulo: { type: string, description: "Eco do titulo informado em /processo/download." }
                 formato: { type: string, example: "pdf" }
                 status: { type: string, enum: [concluido, falhou] }
-                s3_path:
+                download_url:
                   type: string
-                  description: "Chave relativa no S3 (downloads/{user_id}/{uuid}.pdf). Presente quando status=concluido."
+                  format: uri
+                  description: "URL pré-assinada do S3, validade 60 min. Presente quando status=concluido."
                 tamanho_bytes:
                   type: integer
                   description: "Tamanho do PDF em bytes. Presente quando status=concluido."
@@ -333,7 +370,7 @@ webhooks:
                   titulo: "Processo 0001234-56.2024.8.26.0100"
                   formato: pdf
                   status: concluido
-                  s3_path: "downloads/42/9f2c9b1a-1e3a-4d3a-8b7a-2f6f1c9a0b1c.pdf"
+                  download_url: "https://s3.example.com/downloads/42/9f2c9b1a-1e3a-4d3a-8b7a-2f6f1c9a0b1c.pdf?X-Amz-..."
                   tamanho_bytes: 184320
               falhou:
                 summary: Exportação falhou
@@ -344,7 +381,25 @@ webhooks:
                   status: falhou
                   erro_resumo: "Nenhum documento encontrado para o processo informado com os filtros aplicados."
       responses:
-        '200': { description: Webhook recebido pelo cliente. }
+        '200': { description: Webhook recebido pelo chamador. }
+  atualizar_processo:
+    post:
+      summary: Notificação de conclusão de consulta assíncrona
+      description: |
+        Ao concluir uma consulta assíncrona (dados-básicos/movimentos/documentos),
+        o ms-mni faz POST na callback_url informada, com header X-API-Token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numero_processo, tipo, status]
+              properties:
+                numero_processo: { type: string }
+                tipo: { type: string, enum: [dados-basicos, movimentos, documentos] }
+                status: { type: string, example: concluido }
+      responses:
+        '200': { description: Webhook recebido pelo chamador. }
 components:
   securitySchemes:
     ApiToken:
