@@ -34,10 +34,4 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
-
-    'sim_webhook_download' => [
-        'url' => rtrim(env('SIM_APP_URL', ''), '/') . '/webhook/download',
-        'token' => env('MS_MNI_API_TOKEN'),
-        'timeout' => env('SIM_WEBHOOK_TIMEOUT', 10),
-    ],
 ];

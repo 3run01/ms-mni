@@ -10,7 +10,7 @@ class ExportacoesReenviarWebhook extends Command
 {
     protected $signature = 'exportacoes:reenviar-webhook {exportacao_id?} {--reset-tentativas} {--force : Pula confirmação interativa (para uso em scripts)}';
 
-    protected $description = 'Redespacha o webhook de uma (ou várias) exportações pendentes para o SIM';
+    protected $description = 'Redespacha o webhook de uma (ou várias) exportações pendentes para o callback do chamador';
 
     public function handle(): int
     {
