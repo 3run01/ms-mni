@@ -209,19 +209,18 @@ class SalvarDocumentoProcessoService
             return null;
         }
 
-        try {
-            $conteudo = Storage::disk('s3')->get($documento->path_html);
+        $conteudo = Storage::disk('s3')->get($documento->path_html);
 
-            return ($conteudo === null || $conteudo === '') ? null : $conteudo;
-        } catch (\Exception $e) {
+        if ($conteudo === null || $conteudo === '') {
             Log::error('Erro ao ler conteudo HTML do S3', [
                 'documento_id' => $documento->id_documento,
                 'path_html' => $documento->path_html,
-                'error' => $e->getMessage(),
             ]);
 
             return null;
         }
+
+        return $conteudo;
     }
 
     public function downloadPDF($documento, $login_pje = null, $senha_pje = null)
