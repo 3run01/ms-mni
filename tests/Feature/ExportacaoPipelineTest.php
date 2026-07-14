@@ -40,6 +40,8 @@ it('pipeline: POST /api/processo/download → PDF → S3 → webhook', function 
             'titulo' => 'Processo X — PDF',
             'formato' => 'pdf',
             'ids_selecionados' => [1],
+            'callback_url' => 'https://example.com/webhook',
+            'callback_token' => 'tok',
         ]);
 
     $response->assertOk();
