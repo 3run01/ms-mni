@@ -47,3 +47,38 @@ it('downloadHTML salva html e pdf no S3, seta path_html e nao escreve conteudo_h
     expect($documento->path_html)->toBe("documentos-processos/{$numero}/920001.html")
         ->and($documento->conteudo_html)->toBeNull();
 });
+
+it('baixarDocumento re-baixa html quando documento baixado nao tem coluna nem path_html', function () {
+    Storage::fake('s3');
+    $documento = criarDocumentoHtml([
+        'id_documento' => 920002,
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => 'documentos-processos/x/920002.pdf',
+    ]);
+    Storage::disk('s3')->put('documentos-processos/x/920002.pdf', 'pdf-fake');
+
+    $service = Mockery::mock(SalvarDocumentoProcessoService::class)->makePartial();
+    $service->shouldReceive('downloadHTML')->once()->andReturn('documentos-processos/x/920002.pdf');
+
+    $resultado = $service->baixarDocumento($documento);
+
+    expect($resultado->id)->toBe($documento->id);
+});
+
+it('baixarDocumento NAO re-baixa html quando documento baixado ja tem path_html', function () {
+    Storage::fake('s3');
+    $documento = criarDocumentoHtml([
+        'id_documento' => 920003,
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => 'documentos-processos/x/920003.pdf',
+        'path_html' => 'documentos-processos/x/920003.html',
+    ]);
+    Storage::disk('s3')->put('documentos-processos/x/920003.pdf', 'pdf-fake');
+
+    $service = Mockery::mock(SalvarDocumentoProcessoService::class)->makePartial();
+    $service->shouldNotReceive('downloadHTML');
+
+    $resultado = $service->baixarDocumento($documento);
+
+    expect($resultado->id)->toBe($documento->id);
+});

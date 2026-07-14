@@ -92,7 +92,7 @@ class SalvarDocumentoProcessoService
         // try {
         // Verifica se o documento já está baixado e existe no S3
         if ($documento->status == ProcessoDocumento::STATUS_BAIXADO && Storage::disk('s3')->exists($documento->path)) {
-            if ($documento->mimetype == 'text/html' && !$documento->conteudo_html) {
+            if ($documento->mimetype == 'text/html' && !$documento->temConteudoHtml()) {
                 $this->downloadHTML($documento);
             }
 
