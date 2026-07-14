@@ -62,6 +62,79 @@ paths:
                   - { $ref: '#/components/schemas/Tribunal' }
                   - { type: 'null' }
         '401': { $ref: '#/components/responses/Erro401' }
+  /processo/consultar:
+    get:
+      tags: [Processos]
+      summary: Buscar processos por número ou nome de parte
+      description: |
+        Busca paginada (10 por página). Informe `numero_processo` **ou**
+        `nomeParte`. Na busca por número: se o processo não existe no banco,
+        é baixado do MNI de forma síncrona; se existe, uma atualização é
+        disparada em background.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - name: nomeParte
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Página de processos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginacaoProcessos' }
+        '400': { $ref: '#/components/responses/Erro400' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500' }
+  /processo/visualizar:
+    get:
+      tags: [Processos]
+      summary: Obter processo completo
+      description: |
+        Retorna um processo com relações completas (tribunal, partes e
+        representantes, prioridades, classe, assuntos, movimentos, documentos).
+        Baixa do MNI se ausente; senão dispara atualização em background.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+      responses:
+        '200':
+          description: Processo encontrado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Processo' }
+        '400': { $ref: '#/components/responses/Erro400' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500' }
+  /processo/dados-basicos:
+    get:
+      tags: [Processos]
+      summary: Dados básicos do processo (síncrono)
+      description: |
+        Retorna dados básicos (tribunal, classe, assuntos, prioridades, partes
+        e representantes). Se existe no banco, retorna direto; senão consulta o
+        MNI de forma síncrona.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+      responses:
+        '200':
+          description: Dados básicos do processo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Processo' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500' }
 components:
   securitySchemes:
     ApiToken:
