@@ -8,9 +8,9 @@ use App\Models\ProcessoMovimento;
 use App\Models\ProcessoParte;
 use App\Models\ProcessoParteRepresentante;
 use Inertia\Testing\AssertableInertia as Assert;
-use Tests\MultiConnectionDatabaseTestCase;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 
-uses(MultiConnectionDatabaseTestCase::class);
+uses(DatabaseTransactions::class);
 
 function loginProcessos(): User
 {

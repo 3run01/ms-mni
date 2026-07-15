@@ -18,7 +18,6 @@ class Tribunal extends Model
     const TIPO_TST = 'Tribunal Superior do Trabalho (TST)';
     const TIPO_TSE = 'Tribunal Superior Eleitoral (TSE)';
 
-    protected $connection = 'sim';
     protected $logName = 'Tribunal';
     protected $table = 'tribunais';
     protected $fillable = [

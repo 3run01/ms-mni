@@ -3,9 +3,9 @@
 use App\Models\Tribunal;
 use App\Models\User;
 use Inertia\Testing\AssertableInertia as Assert;
-use Tests\SimDatabaseTestCase;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 
-uses(SimDatabaseTestCase::class);
+uses(DatabaseTransactions::class);
 
 function tribunalPayload(array $overrides = []): array
 {

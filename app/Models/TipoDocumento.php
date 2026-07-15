@@ -10,7 +10,6 @@ use Illuminate\Database\Eloquent\Builder;
 class TipoDocumento extends Model
 {
     use HasFactory, SoftDeletes;
-    protected $connection = 'sim';
     protected $logName = 'TipoDocumento';
     protected $table = 'tipos_documentos';
 
