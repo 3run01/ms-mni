@@ -13,6 +13,18 @@ return new class extends Migration
      */
     public function up(): void
     {
+        $model = new Tribunal();
+        $conexao = $model->getConnectionName();
+
+        try {
+            if (! Schema::connection($conexao)->hasTable($model->getTable())
+                || ! Schema::connection($conexao)->hasColumn($model->getTable(), 'uuid')) {
+                return;
+            }
+        } catch (\Throwable $e) {
+            return;
+        }
+
         Tribunal::whereNull('uuid')->each(function ($tribunal) {
             $tribunal->update(['uuid' => Str::uuid()]);
         });
