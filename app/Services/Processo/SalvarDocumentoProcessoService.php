@@ -15,19 +15,17 @@ use Illuminate\Support\Facades\Process;
 
 class SalvarDocumentoProcessoService
 {
-    public function execute($processo, $documentos)
+    public function execute($processo, $documentos, $login_pje = null, $senha_pje = null)
     {
         $documentos = is_array($documentos) ? $documentos : [$documentos];
 
         foreach ($documentos as $documento) {
 
-            $this->salvarDocumento($processo, $documento);
+            $this->salvarDocumento($processo, $documento, $login_pje, $senha_pje);
             if (isset($documento->documentoVinculado)) {
-                // dd($documento->documentoVinculado);
                 $documentoVinculado = is_array($documento->documentoVinculado) ? $documento->documentoVinculado : [$documento->documentoVinculado];
                 foreach ($documentoVinculado as $documentoVinculado) {
-                    // dd($documentoVinculado);
-                    $this->salvarDocumento($processo, $documentoVinculado);
+                    $this->salvarDocumento($processo, $documentoVinculado, $login_pje, $senha_pje);
                 }
             }
         }

@@ -25,6 +25,47 @@ function criarDocumentoHtml(array $overrides = []): ProcessoDocumento
     ], $overrides));
 }
 
+it('execute repassa credenciais pje para os jobs de download', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+    $processo = Processo::factory()->create([
+        'numero_processo' => 'SVCS3CRED' . getmypid(),
+    ]);
+    $documento = (object) [
+        'idDocumento' => 930001,
+        'tipoDocumento' => '57',
+        'dataHora' => '2024-12-12 10:00:00',
+        'mimetype' => 'application/pdf',
+        'descricao' => 'Peticao',
+        'documentoVinculado' => (object) [
+            'idDocumento' => 930002,
+            'idDocumentoVinculado' => 930001,
+            'tipoDocumento' => '57',
+            'dataHora' => '2024-12-12 10:00:00',
+            'mimetype' => 'application/pdf',
+            'descricao' => 'Anexo',
+        ],
+    ];
+
+    $service = new SalvarDocumentoProcessoService();
+    $service->execute($processo, [$documento], 'login-pje', 'senha-pje');
+
+    $credenciais = function ($job) {
+        $ref = new ReflectionClass($job);
+        $login = $ref->getProperty('login_pje');
+        $login->setAccessible(true);
+        $senha = $ref->getProperty('senha_pje');
+        $senha->setAccessible(true);
+
+        return [$login->getValue($job), $senha->getValue($job)];
+    };
+
+    \Illuminate\Support\Facades\Queue::assertPushed(
+        \App\Jobs\BaixarDocumentoMNIJob::class,
+        fn ($job) => $credenciais($job) === ['login-pje', 'senha-pje']
+    );
+    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\BaixarDocumentoMNIJob::class, 2);
+});
+
 it('downloadHTML salva html e pdf no S3, seta path_html e nao escreve conteudo_html', function () {
     Storage::fake('s3');
     $documento = criarDocumentoHtml();
