@@ -83,8 +83,8 @@ class Tribunal extends Model
             self::TIPO_TSE
         ];
     }
-    // public function tiposDocumentos()
-    // {
-    //     return $this->hasMany(TipoDocumento::class, 'tribunal_id', 'id');
-    // }
+    public function tiposDocumentos()
+    {
+        return $this->hasMany(TipoDocumento::class, 'tribunal_id', 'id');
+    }
 }

@@ -22,6 +22,14 @@ class TipoDocumento extends Model
         'exibir_expediente'
     ];
 
+    // Flags de exibição são config local (não vêm do MNI); default false ao criar
+    // via command/CRUD, satisfazendo as colunas NOT NULL de tipos_documentos.
+    protected $attributes = [
+        'exibir_peticao_incidental' => false,
+        'exibir_peticao_inicial' => false,
+        'exibir_expediente' => false,
+    ];
+
     public function tribunal()
     {
         return $this->belongsTo(Tribunal::class)->where('ativo', true);
