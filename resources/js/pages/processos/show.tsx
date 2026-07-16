@@ -1,9 +1,11 @@
 import { Deferred, Head } from '@inertiajs/react';
-import { Copy, FileText } from 'lucide-react';
+import { Copy, Eye, FileText } from 'lucide-react';
+import { useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -94,6 +96,8 @@ function GrupoPartes({ titulo, partes }: { titulo: string; partes: ParteItem[] }
 }
 
 export default function ProcessoShow({ processo, movimentos, documentos }: Props) {
+    const [docAberto, setDocAberto] = useState<DocumentoItem | null>(null);
+
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Processos', href: '/processos' },
         { title: processo.numero_processo ?? String(processo.id), href: `/processos/${processo.id}` },
@@ -222,6 +226,7 @@ export default function ProcessoShow({ processo, movimentos, documentos }: Props
                                                 <TableHead>Sigilo</TableHead>
                                                 <TableHead>Juntada</TableHead>
                                                 <TableHead>Status</TableHead>
+                                                <TableHead className="w-10" />
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -236,6 +241,18 @@ export default function ProcessoShow({ processo, movimentos, documentos }: Props
                                                         {formatDataHora(doc.data_juntada ?? doc.data_hora)}
                                                     </TableCell>
                                                     <TableCell className="text-muted-foreground">{doc.status ?? '—'}</TableCell>
+                                                    <TableCell>
+                                                        {doc.status === 'baixado' && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                aria-label="Visualizar documento"
+                                                                onClick={() => setDocAberto(doc)}
+                                                            >
+                                                                <Eye className="size-4" />
+                                                            </Button>
+                                                        )}
+                                                    </TableCell>
                                                 </TableRow>
                                             ))}
                                         </TableBody>
@@ -245,6 +262,24 @@ export default function ProcessoShow({ processo, movimentos, documentos }: Props
                         </Deferred>
                     </TabsContent>
                 </Tabs>
+
+                <Dialog open={docAberto !== null} onOpenChange={(open) => !open && setDocAberto(null)}>
+                    <DialogContent className="flex h-[85vh] flex-col gap-3 sm:max-w-4xl">
+                        <DialogHeader>
+                            <DialogTitle className="pr-8">
+                                {docAberto?.descricao ?? 'Documento'}
+                            </DialogTitle>
+                        </DialogHeader>
+                        {docAberto && (
+                            <iframe
+                                src={`/processos/${processo.id}/documentos/${docAberto.id}`}
+                                title={docAberto.descricao ?? 'Documento'}
+                                className="w-full flex-1 rounded-md border bg-white"
+                                {...(docAberto.mimetype === 'text/html' ? { sandbox: '' } : {})}
+                            />
+                        )}
+                    </DialogContent>
+                </Dialog>
             </div>
         </AppLayout>
     );
