@@ -58,7 +58,7 @@ class ProcessoService
         $salvarMovimentoProcessoService->execute($processo, $retorno->movimento);
 
         $salvarDocumentoProcessoService = new SalvarDocumentoProcessoService();
-        $salvarDocumentoProcessoService->execute($processo, $retorno->documento);
+        $salvarDocumentoProcessoService->execute($processo, $retorno->documento, $login, $senha);
 
         return $processo;
     }
@@ -130,7 +130,7 @@ class ProcessoService
         );
 
         $processo = $this->getProcesso($tribunal, $numero_processo, $login, $senha);
-        $this->salvarDocumentoProcessoService->execute($processo, $retorno->documento);
+        $this->salvarDocumentoProcessoService->execute($processo, $retorno->documento, $login, $senha);
         return $processo;
     }
 

@@ -10,7 +10,6 @@ use Illuminate\Database\Eloquent\Builder;
 class TipoDocumento extends Model
 {
     use HasFactory, SoftDeletes;
-    protected $connection = 'sim';
     protected $logName = 'TipoDocumento';
     protected $table = 'tipos_documentos';
 
@@ -21,6 +20,14 @@ class TipoDocumento extends Model
         'exibir_peticao_incidental',
         'exibir_peticao_inicial',
         'exibir_expediente'
+    ];
+
+    // Flags de exibição são config local (não vêm do MNI); default false ao criar
+    // via command/CRUD, satisfazendo as colunas NOT NULL de tipos_documentos.
+    protected $attributes = [
+        'exibir_peticao_incidental' => false,
+        'exibir_peticao_inicial' => false,
+        'exibir_expediente' => false,
     ];
 
     public function tribunal()

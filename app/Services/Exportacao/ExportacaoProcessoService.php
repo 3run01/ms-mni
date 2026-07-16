@@ -23,6 +23,8 @@ class ExportacaoProcessoService
             'tribunal_id' => $dados['tribunal_id'] ?? null,
             'titulo' => $dados['titulo'],
             'formato' => $dados['formato'],
+            'callback_url' => $dados['callback_url'],
+            'callback_token' => $dados['callback_token'],
             'status' => ProcessoExportacao::STATUS_ENFILEIRADO,
             'filtros' => [
                 'ids_selecionados' => $dados['ids_selecionados'] ?? null,
@@ -47,7 +49,7 @@ class ExportacaoProcessoService
     }
 
     /**
-     * Marca a exportação como falhou e dispara o webhook de notificação ao SIM.
+     * Marca a exportação como falhou e dispara o callback de notificação ao chamador.
      * É chamado tanto pelo controle de erro dos jobs quanto pelo "no documents" path.
      */
     public function marcarComoFalhou(ProcessoExportacao $exportacao, string $erroResumo): void

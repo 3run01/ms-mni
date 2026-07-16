@@ -26,6 +26,11 @@ class DocumentoController extends Controller
 
     public function show(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         try {
             $maxTentativas = 3;
             $tentativa = 0;
@@ -36,8 +41,8 @@ class DocumentoController extends Controller
                     $request->id_documento,
                     $request->numero_processo,
                     $tribunal,
-                    $request->login_pje ?? null,
-                    $request->senha_pje ?? null
+                    $request->login_pje,
+                    $request->senha_pje
                 );
 
                 if (!empty($documento) && !empty($documento->link)) {
@@ -46,6 +51,8 @@ class DocumentoController extends Controller
                         'documento' => $documento
                     ]);
                 }
+
+                $tentativa++;
             } while ($tentativa < $maxTentativas);
 
             return response()->json([
@@ -62,17 +69,14 @@ class DocumentoController extends Controller
 
     public function getDocumento($id_documento, $numero_processo, $tribunal, $login_pje = null, $senha_pje = null)
     {
-
-
         try {
-            $service = new SalvarDocumentoProcessoService();
+            $service = app(SalvarDocumentoProcessoService::class);
             $documento = $this->vericarExistenciaDocumento($id_documento, $numero_processo, $tribunal, $login_pje, $senha_pje);
 
-            //verifica se o documento existe e se estar sem conteudo html
-            if (empty($documento->conteudo_html)) {
+            // baixa o documento caso ainda nao tenha conteudo html (coluna legado ou path_html)
+            if (!$documento->temConteudoHtml()) {
                 $documento = $service->baixarDocumento($documento, $login_pje, $senha_pje);
             }
-
 
             // Se o documento já estiver baixado e existir no S3, apenas gera o link
             if ($documento->status == ProcessoDocumento::STATUS_BAIXADO && Storage::disk('s3')->exists($documento->path)) {
@@ -82,14 +86,13 @@ class DocumentoController extends Controller
                         now()->addMinutes(60)
                     );
 
-                    return $documento;
+                    return $this->anexarConteudoHtml($service, $documento, $login_pje, $senha_pje);
                 } catch (\Exception $e) {
                     Log::error('Erro ao gerar link temporário para documento: ' . $e->getMessage(), [
                         'trace' => $e->getTraceAsString()
                     ]);
                 }
             }
-
 
             $documento = $service->baixarDocumento(
                 $documento,
@@ -105,7 +108,7 @@ class DocumentoController extends Controller
                         now()->addMinutes(60)
                     );
 
-                    return $documento;
+                    return $this->anexarConteudoHtml($service, $documento, $login_pje, $senha_pje);
                 } catch (\Exception $e) {
                     Log::error('Erro ao gerar link temporário para documento após download: ' . $e->getMessage(), [
                         'trace' => $e->getTraceAsString()
@@ -122,6 +125,39 @@ class DocumentoController extends Controller
             Log::error('Erro ao obter documento: ' . $e->getMessage());
             throw new MNIException($e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Anexa o conteudo HTML ao documento apenas para a resposta (nada é persistido).
+     * Se um documento HTML ficou sem conteudo recuperavel (objeto sumiu do S3),
+     * tenta a auto-correcao re-executando o downloadHTML uma vez.
+     */
+    private function anexarConteudoHtml(SalvarDocumentoProcessoService $service, ProcessoDocumento $documento, $login_pje = null, $senha_pje = null): ProcessoDocumento
+    {
+        $conteudo = $service->obterConteudoHtml($documento);
+
+        if ($conteudo === null && $documento->mimetype === 'text/html') {
+            try {
+                // Auto-correcao numa instancia limpa: o $documento carrega o atributo
+                // transitorio `link` (nao e coluna), e um save() dele quebraria.
+                $documentoLimpo = $documento->fresh();
+
+                if ($documentoLimpo) {
+                    $service->downloadHTML($documentoLimpo, $login_pje, $senha_pje);
+                    $conteudo = $service->obterConteudoHtml($documentoLimpo);
+                }
+            } catch (\Exception $e) {
+                Log::error('Erro ao recuperar conteudo HTML do documento', [
+                    'documento_id' => $documento->id_documento,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $documento->conteudo_html = $conteudo;
+        $documento->makeVisible('conteudo_html');
+
+        return $documento;
     }
 
     public function vericarExistenciaDocumento($id_documento, $numero_processo, $tribunal, $login_pje = null, $senha_pje = null)
@@ -150,6 +186,11 @@ class DocumentoController extends Controller
 
     public function listarDocumentos(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
         $processo = Processo::with('documentos')
             ->where('numero_processo', $numero_processo)
@@ -163,8 +204,8 @@ class DocumentoController extends Controller
         $processo = $this->processoService->consultarDocumentos(
             Tribunal::find($request->tribunal_id),
             $numero_processo,
-            $request->login_pje ?? null,
-            $request->senha_pje ?? null,
+            $request->login_pje,
+            $request->senha_pje,
             $request->data_referencia ?? null,
         );
 
@@ -179,7 +220,17 @@ class DocumentoController extends Controller
 
     public function consultarDocumentosAsync(Request $request)
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+            'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
+            'callback_token' => ['required', 'string', 'max:500'],
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        ConsultarDocumentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
+        ConsultarDocumentosProcessoMNIJob::dispatch(
+            $request->tribunal_id, $numero_processo, $request->login_pje, $request->senha_pje,
+            $request->callback_url, $request->callback_token
+        )->onQueue('alta');
     }
 }

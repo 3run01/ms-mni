@@ -11,10 +11,12 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('tribunais') || Schema::hasColumn('tribunais', 'uuid')) {
+            return;
+        }
+
         Schema::table('tribunais', function (Blueprint $table) {
-            Schema::table('tribunais', function (Blueprint $table) {
-                $table->uuid('uuid')->unique()->after('id')->nullable();
-            });
+            $table->uuid('uuid')->unique()->after('id')->nullable();
         });
     }
 
@@ -23,10 +25,10 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('tribunais', function (Blueprint $table) {
+        if (Schema::hasTable('tribunais') && Schema::hasColumn('tribunais', 'uuid')) {
             Schema::table('tribunais', function (Blueprint $table) {
                 $table->dropColumn('uuid');
             });
-        });
+        }
     }
 };

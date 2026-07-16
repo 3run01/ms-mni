@@ -30,6 +30,8 @@ class ProcessoExportacao extends Model
         'tamanho_bytes',
         'erro_resumo',
         'filtros',
+        'callback_url',
+        'callback_token',
         'webhook_enviado_em',
         'webhook_tentativas',
     ];

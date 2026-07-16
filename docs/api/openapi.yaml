@@ -1,0 +1,787 @@
+openapi: 3.1.0
+info:
+  title: API MNI/PJe — ms-mni
+  version: "1.0.0"
+  description: |
+    API REST externa do ms-mni para consulta de processos, documentos e
+    tribunais via integração MNI/PJe.
+
+    ## Autenticação
+    Todas as rotas exigem o header `X-API-Token` com um token válido.
+
+    ## Aviso de segurança
+    Os endpoints de consulta de processo e documento recebem `login_pje` e
+    `senha_pje` como **query params**. Isso expõe credenciais PJe na URL (logs
+    de servidor, histórico de proxy). **Não registre em log as URLs completas
+    destas requisições.**
+servers:
+  - url: https://{host}/api
+    description: Servidor da aplicação
+    variables:
+      host:
+        default: localhost:8006
+security:
+  - ApiToken: []
+tags:
+  - name: Processos
+    description: Consulta e exportação de processos
+  - name: Documentos
+    description: Consulta e download de documentos
+  - name: Tribunais
+    description: Listagem de tribunais
+paths:
+  /tribunais:
+    get:
+      tags: [Tribunais]
+      summary: Listar tribunais ativos
+      description: Retorna todos os tribunais com `ativo = true`.
+      responses:
+        '200':
+          description: Lista de tribunais.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Tribunal' }
+        '401': { $ref: '#/components/responses/Erro401' }
+  /tribunais/{uuid}:
+    get:
+      tags: [Tribunais]
+      summary: Obter tribunal por uuid
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Tribunal encontrado (ou `null` se não existir).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Tribunal' }
+                  - { type: 'null' }
+        '401': { $ref: '#/components/responses/Erro401' }
+  /processo/consultar:
+    get:
+      tags: [Processos]
+      summary: Buscar processos por número
+      description: |
+        Busca paginada (10 por página) por `numero_processo`. Se o processo não
+        existe no banco, é baixado do MNI de forma síncrona; se existe, uma
+        atualização é disparada em background.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+      responses:
+        '200':
+          description: Página de processos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginacaoProcessos' }
+        '400': { $ref: '#/components/responses/Erro400' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500' }
+  /processo/visualizar:
+    get:
+      tags: [Processos]
+      summary: Obter processo completo
+      description: |
+        Retorna um processo com relações completas (tribunal, partes e
+        representantes, prioridades, classe, assuntos, movimentos, documentos).
+        Baixa do MNI se ausente; senão dispara atualização em background.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+      responses:
+        '200':
+          description: Processo encontrado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Processo' }
+        '400': { $ref: '#/components/responses/Erro400' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500' }
+  /processo/dados-basicos:
+    get:
+      tags: [Processos]
+      summary: Dados básicos do processo (síncrono)
+      description: |
+        Retorna dados básicos (tribunal, classe, assuntos, prioridades, partes
+        e representantes). Se existe no banco, retorna direto; senão consulta o
+        MNI de forma síncrona.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+      responses:
+        '200':
+          description: Dados básicos do processo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Processo' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500Generico' }
+  /processo/movimentos/listar:
+    get:
+      tags: [Processos]
+      summary: Listar movimentos (síncrono)
+      description: Retorna do banco se houver movimentos; senão consulta o MNI.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - { $ref: '#/components/parameters/DataReferencia' }
+      responses:
+        '200':
+          description: Lista de movimentos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Movimento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500Generico' }
+  /processo/documentos/listar:
+    get:
+      tags: [Documentos]
+      summary: Listar documentos (síncrono)
+      description: Retorna do banco se houver documentos; senão consulta o MNI. O campo `tipo` é resolvido.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - { $ref: '#/components/parameters/DataReferencia' }
+      responses:
+        '200':
+          description: Lista de documentos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Documento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500': { $ref: '#/components/responses/Erro500Generico' }
+  /processo/consultar/dados-basicos/async:
+    get:
+      tags: [Processos]
+      summary: Enfileirar consulta de dados básicos (assíncrono)
+      description: Enfileira `ConsultarDadosBasicosProcessoMNIJob` na fila `alta`. Retorna 200 com corpo vazio.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - name: callback_url
+          in: query
+          required: true
+          description: "URL https de callback (bloqueia IPs internos)."
+          schema: { type: string, format: uri }
+        - name: callback_token
+          in: query
+          required: true
+          description: "Token reenviado no header X-API-Token do callback."
+          schema: { type: string }
+      responses:
+        '200': { description: Job enfileirado. Corpo vazio. }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+  /processo/consultar/movimentos/async:
+    get:
+      tags: [Processos]
+      summary: Enfileirar consulta de movimentos (assíncrono)
+      description: Enfileira `ConsultarMovimentosProcessoMNIJob` na fila `alta`. Retorna 200 com corpo vazio.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - name: callback_url
+          in: query
+          required: true
+          description: "URL https de callback (bloqueia IPs internos)."
+          schema: { type: string, format: uri }
+        - name: callback_token
+          in: query
+          required: true
+          description: "Token reenviado no header X-API-Token do callback."
+          schema: { type: string }
+      responses:
+        '200': { description: Job enfileirado. Corpo vazio. }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+  /processo/consultar/documentos/async:
+    get:
+      tags: [Documentos]
+      summary: Enfileirar consulta de documentos (assíncrono)
+      description: Enfileira `ConsultarDocumentosProcessoMNIJob` na fila `alta`. Retorna 200 com corpo vazio.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - name: callback_url
+          in: query
+          required: true
+          description: "URL https de callback (bloqueia IPs internos)."
+          schema: { type: string, format: uri }
+        - name: callback_token
+          in: query
+          required: true
+          description: "Token reenviado no header X-API-Token do callback."
+          schema: { type: string }
+      responses:
+        '200': { description: Job enfileirado. Corpo vazio. }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '422': { $ref: '#/components/responses/Erro422' }
+  /documento/visualizar:
+    get:
+      tags: [Documentos]
+      summary: Baixar documento e obter link temporário
+      description: |
+        Baixa o documento (até 3 tentativas) e retorna um link temporário do
+        S3, válido por 60 minutos, em `documento.link`.
+      parameters:
+        - { $ref: '#/components/parameters/LoginPje' }
+        - { $ref: '#/components/parameters/SenhaPje' }
+        - { $ref: '#/components/parameters/TribunalIdQuery' }
+        - { $ref: '#/components/parameters/NumeroProcessoQuery' }
+        - { $ref: '#/components/parameters/IdDocumento' }
+      responses:
+        '200':
+          description: Documento consultado com sucesso.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Documento 12345 consultado com sucesso" }
+                  documento: { $ref: '#/components/schemas/Documento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404':
+          description: Documento não obtido após as tentativas.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
+              example: { message: "Não foi possível obter o documento 12345 do processo ... após 3 tentativas" }
+        '422': { $ref: '#/components/responses/Erro422' }
+        '500':
+          description: Erro interno.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
+  /processo/download:
+    post:
+      tags: [Processos]
+      summary: Exportar processo em PDF (assíncrono)
+      description: |
+        Enfileira a geração de um PDF de exportação. O arquivo pronto é
+        entregue via webhook de saída (ver seção `webhooks`). Retorna
+        imediatamente o `exportacao_id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numero_processo, user_id, titulo, formato, callback_url, callback_token]
+              properties:
+                numero_processo: { type: string, maxLength: 25 }
+                tribunal_id: { type: [integer, 'null'] }
+                user_id: { type: integer, minimum: 1, description: "Eco no webhook." }
+                titulo: { type: string, maxLength: 255, description: "Eco no webhook." }
+                formato: { type: string, enum: [pdf] }
+                ids_selecionados:
+                  type: array
+                  items: { type: integer }
+                periodo_inicial: { type: string, format: date, description: "required_with periodo_final" }
+                periodo_final: { type: string, format: date, description: "required_with periodo_inicial" }
+                id_inicial: { type: integer, description: "required_with id_final" }
+                id_final: { type: integer, description: "required_with id_inicial" }
+                callback_url:
+                  type: string
+                  format: uri
+                  description: "URL https do chamador que receberá a notificação de conclusão. Bloqueia IPs internos."
+                callback_token:
+                  type: string
+                  description: "Token reenviado no header X-API-Token da chamada de callback, para o chamador validar a origem."
+      responses:
+        '200':
+          description: Exportação enfileirada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportacaoEnfileirada' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404':
+          description: Nenhum documento encontrado com os filtros aplicados.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+              example: { error: "Nenhum documento encontrado para o processo informado com os filtros aplicados." }
+        '422': { $ref: '#/components/responses/Erro422' }
+webhooks:
+  download:
+    post:
+      summary: Notificação de conclusão da exportação
+      description: >
+        Ao concluir (ou falhar) a exportação, o ms-mni faz `POST {callback_url}`
+        (a URL informada na requisição de download), com header
+        `X-API-Token: {callback_token}`. O chamador implementa este endpoint.
+        Payload tipado por status.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, titulo, formato, status]
+              properties:
+                user_id: { type: integer, description: "Eco do user_id informado em /processo/download." }
+                titulo: { type: string, description: "Eco do titulo informado em /processo/download." }
+                formato: { type: string, example: "pdf" }
+                status: { type: string, enum: [concluido, falhou] }
+                download_url:
+                  type: string
+                  format: uri
+                  description: "URL pré-assinada do S3, validade 60 min. Presente quando status=concluido."
+                tamanho_bytes:
+                  type: integer
+                  description: "Tamanho do PDF em bytes. Presente quando status=concluido."
+                erro_resumo:
+                  type: string
+                  description: "Resumo do erro. Presente quando status=falhou."
+            examples:
+              concluido:
+                summary: Exportação concluída
+                value:
+                  user_id: 42
+                  titulo: "Processo 0001234-56.2024.8.26.0100"
+                  formato: pdf
+                  status: concluido
+                  download_url: "https://s3.example.com/downloads/42/9f2c9b1a-1e3a-4d3a-8b7a-2f6f1c9a0b1c.pdf?X-Amz-..."
+                  tamanho_bytes: 184320
+              falhou:
+                summary: Exportação falhou
+                value:
+                  user_id: 42
+                  titulo: "Processo 0001234-56.2024.8.26.0100"
+                  formato: pdf
+                  status: falhou
+                  erro_resumo: "Nenhum documento encontrado para o processo informado com os filtros aplicados."
+      responses:
+        '200': { description: Webhook recebido pelo chamador. }
+  atualizar_processo:
+    post:
+      summary: Notificação de conclusão de consulta assíncrona
+      description: |
+        Ao concluir uma consulta assíncrona (dados-básicos/movimentos/documentos),
+        o ms-mni faz POST na callback_url informada, com header X-API-Token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numero_processo, tipo, status]
+              properties:
+                numero_processo: { type: string }
+                tipo: { type: string, enum: [dados-basicos, movimentos, documentos] }
+                status: { type: string, example: concluido }
+      responses:
+        '200': { description: Webhook recebido pelo chamador. }
+components:
+  securitySchemes:
+    ApiToken:
+      type: apiKey
+      in: header
+      name: X-API-Token
+      description: Token de API emitido pelo ms-mni.
+  schemas:
+    Erro:
+      type: object
+      description: Erro genérico com detalhes de origem (respostas 500).
+      properties:
+        error:
+          type: string
+          example: "Mensagem do erro"
+        line:
+          type: integer
+          example: 49
+        file:
+          type: string
+          example: "/app/Http/Controllers/Api/ConsultarProcessoController.php"
+      required: [error]
+    ErroMensagem:
+      type: object
+      description: Erro simples com apenas mensagem.
+      properties:
+        message:
+          type: string
+          example: "Token inválido ou não fornecido"
+      required: [message]
+    Tribunal:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        uuid: { type: string, format: uuid }
+        nome: { type: string, example: "TJSP" }
+        tipo: { type: string, example: "Tribunal de Justiça" }
+        ativo: { type: boolean, example: true }
+        versao_mni:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_peticao_inicial:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_peticao_avulsa:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_certidao_inicio_fim:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_seeu:
+          oneOf:
+            - type: string
+            - type: "null"
+        usar_codigo_documento_padrao:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        enviar_dados_criminais:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        url_webservice_mni_consultar_processo:
+          type: [string, 'null']
+          description: "URL do webservice MNI usado para consulta de processos."
+        url_webservice_mni_criminal:
+          type: [string, 'null']
+          description: "URL do webservice MNI usado para dados criminais (SEEU)."
+    ProcessoParte:
+      type: object
+      properties:
+        nome: { type: string, example: "Fulano de Tal" }
+        cpf_cnpj:
+          oneOf:
+            - type: string
+              example: "12345678900"
+            - type: "null"
+        polo:
+          oneOf:
+            - type: string
+              example: "AT"
+            - type: "null"
+        cep:
+          oneOf:
+            - type: string
+            - type: "null"
+        logradouro:
+          oneOf:
+            - type: string
+            - type: "null"
+        numero:
+          oneOf:
+            - type: string
+            - type: "null"
+        bairro:
+          oneOf:
+            - type: string
+            - type: "null"
+        municipio:
+          oneOf:
+            - type: string
+            - type: "null"
+        estado:
+          oneOf:
+            - type: string
+            - type: "null"
+        representantes_processual:
+          type: array
+          items: { type: object }
+    Movimento:
+      type: object
+      properties:
+        identificador_movimento:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_nacional:
+          oneOf:
+            - type: string
+            - type: "null"
+        complemento:
+          oneOf:
+            - type: string
+            - type: "null"
+        data_hora:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        id_documento_vinculado:
+          oneOf:
+            - type: string
+            - type: "null"
+    Documento:
+      type: object
+      properties:
+        id_documento: { type: integer, example: 12345 }
+        id_documento_vinculado:
+          oneOf:
+            - type: integer
+            - type: "null"
+        tipo_documento:
+          oneOf:
+            - type: string
+            - type: "null"
+        tipo:
+          oneOf:
+            - type: string
+              description: "Descrição do tipo, resolvida em /processo/documentos/listar."
+            - type: "null"
+        descricao:
+          oneOf:
+            - type: string
+            - type: "null"
+        movimento:
+          oneOf:
+            - type: string
+            - type: "null"
+        data_hora:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        data_juntada:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        usuario_juntada_arquivo:
+          oneOf:
+            - type: string
+            - type: "null"
+        mimetype:
+          oneOf:
+            - type: string
+            - type: "null"
+        hash:
+          oneOf:
+            - type: string
+            - type: "null"
+        nivel_sigilo:
+          oneOf:
+            - type: integer
+            - type: "null"
+        status:
+          oneOf:
+            - type: string
+              enum: [baixado, pendente, erro]
+            - type: "null"
+        file_size:
+          oneOf:
+            - type: integer
+            - type: "null"
+        link:
+          oneOf:
+            - type: string
+              format: uri
+              description: "URL temporária S3 (validade 60 min), presente apenas em /documento/visualizar."
+            - type: "null"
+    Processo:
+      type: object
+      description: |
+        Processo com relações. As relações presentes variam por endpoint.
+        Campos ocultos do model (id, tribunal_id, payload_envio, etc.) não aparecem.
+      properties:
+        numero_processo: { type: string }
+        jurisdicao_codigo:
+          oneOf:
+            - type: string
+            - type: "null"
+        classe_codigo:
+          oneOf:
+            - type: string
+            - type: "null"
+        assunto_codigo:
+          oneOf:
+            - type: string
+            - type: "null"
+        competencia_codigo:
+          oneOf:
+            - type: string
+            - type: "null"
+        valor_causa:
+          oneOf:
+            - type: string
+            - type: "null"
+        nivel_sigilo:
+          oneOf:
+            - type: integer
+            - type: "null"
+        status:
+          oneOf:
+            - type: string
+            - type: "null"
+        justica_gratuita:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        pedido_liminar:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        nome_orgao_julgador:
+          oneOf:
+            - type: string
+            - type: "null"
+        codigo_orgao_julgador:
+          oneOf:
+            - type: string
+            - type: "null"
+        instancia_orgao_julgador:
+          oneOf:
+            - type: string
+            - type: "null"
+        tribunal: { $ref: '#/components/schemas/Tribunal' }
+        classe:
+          oneOf:
+            - type: object
+            - type: "null"
+        assuntos: { type: array, items: { type: object } }
+        prioridades: { type: array, items: { type: object } }
+        partes:
+          type: array
+          items: { $ref: '#/components/schemas/ProcessoParte' }
+        movimentos:
+          type: array
+          items: { $ref: '#/components/schemas/Movimento' }
+        documentos:
+          type: array
+          items: { $ref: '#/components/schemas/Documento' }
+    PaginacaoProcessos:
+      type: object
+      description: Envelope padrão do paginate() do Laravel.
+      properties:
+        current_page: { type: integer, example: 1 }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Processo' }
+        first_page_url: { type: string }
+        from:
+          oneOf:
+            - type: integer
+            - type: "null"
+        last_page: { type: integer, example: 1 }
+        last_page_url: { type: string }
+        next_page_url:
+          oneOf:
+            - type: string
+            - type: "null"
+        path: { type: string }
+        per_page: { type: integer, example: 10 }
+        prev_page_url:
+          oneOf:
+            - type: string
+            - type: "null"
+        to:
+          oneOf:
+            - type: integer
+            - type: "null"
+        total: { type: integer, example: 1 }
+    ExportacaoEnfileirada:
+      type: object
+      properties:
+        message: { type: string, example: "Exportação enfileirada" }
+        exportacao_id: { type: integer, example: 42 }
+  parameters:
+    LoginPje:
+      name: login_pje
+      in: query
+      required: true
+      description: Login do usuário no PJe. Enviado na query string (ver aviso de segurança).
+      schema: { type: string }
+    SenhaPje:
+      name: senha_pje
+      in: query
+      required: true
+      description: Senha do usuário no PJe. Enviada na query string (ver aviso de segurança).
+      schema: { type: string }
+    TribunalIdQuery:
+      name: tribunal_id
+      in: query
+      required: false
+      description: ID do tribunal. Obrigatório na prática para consultas de processo.
+      schema: { type: integer }
+    NumeroProcessoQuery:
+      name: numero_processo
+      in: query
+      required: false
+      description: Número do processo (será normalizado internamente).
+      schema: { type: string }
+    DataReferencia:
+      name: data_referencia
+      in: query
+      required: false
+      description: Data de referência para filtro incremental (movimentos/documentos).
+      schema: { type: string, format: date }
+    IdDocumento:
+      name: id_documento
+      in: query
+      required: true
+      description: Identificador do documento no processo.
+      schema: { type: string }
+  responses:
+    Erro400:
+      description: Requisição inválida (parâmetro obrigatório ausente).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+          example: { error: "Tribunal não informado" }
+    Erro401:
+      description: Token inválido ou não fornecido.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErroMensagem' }
+          example: { message: "Token inválido ou não fornecido" }
+    Erro422:
+      description: Falha de validação (ex. login_pje/senha_pje ausentes).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+          example:
+            message: "The login pje field is required."
+            errors: { login_pje: ["The login pje field is required."] }
+    Erro500:
+      description: Erro interno / exceção MNI.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Erro' }
+    Erro500Generico:
+      description: Erro interno.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErroMensagem' }

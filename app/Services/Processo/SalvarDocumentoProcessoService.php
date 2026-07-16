@@ -15,19 +15,17 @@ use Illuminate\Support\Facades\Process;
 
 class SalvarDocumentoProcessoService
 {
-    public function execute($processo, $documentos)
+    public function execute($processo, $documentos, $login_pje = null, $senha_pje = null)
     {
         $documentos = is_array($documentos) ? $documentos : [$documentos];
 
         foreach ($documentos as $documento) {
 
-            $this->salvarDocumento($processo, $documento);
+            $this->salvarDocumento($processo, $documento, $login_pje, $senha_pje);
             if (isset($documento->documentoVinculado)) {
-                // dd($documento->documentoVinculado);
                 $documentoVinculado = is_array($documento->documentoVinculado) ? $documento->documentoVinculado : [$documento->documentoVinculado];
                 foreach ($documentoVinculado as $documentoVinculado) {
-                    // dd($documentoVinculado);
-                    $this->salvarDocumento($processo, $documentoVinculado);
+                    $this->salvarDocumento($processo, $documentoVinculado, $login_pje, $senha_pje);
                 }
             }
         }
@@ -92,7 +90,7 @@ class SalvarDocumentoProcessoService
         // try {
         // Verifica se o documento já está baixado e existe no S3
         if ($documento->status == ProcessoDocumento::STATUS_BAIXADO && Storage::disk('s3')->exists($documento->path)) {
-            if ($documento->mimetype == 'text/html' && !$documento->conteudo_html) {
+            if ($documento->mimetype == 'text/html' && !$documento->temConteudoHtml()) {
                 $this->downloadHTML($documento);
             }
 
@@ -156,41 +154,71 @@ class SalvarDocumentoProcessoService
             $pdf = Pdf::loadHTML($conteudoDecodificado);
             $pasta = "documentos-processos";
             $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".pdf";
+            $filenameHtml = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".html";
 
-            // Tenta salvar o arquivo algumas vezes
-            $maxTentativas = 3;
-            $tentativa = 0;
-            $sucesso = false;
+            $this->putComRetry($filename, $pdf->output(), 'PDF');
+            $this->putComRetry($filenameHtml, $conteudoDecodificado, 'HTML');
 
-            while (!$sucesso && $tentativa < $maxTentativas) {
-                try {
-                    $sucesso = Storage::disk('s3')->put($filename, $pdf->output());
-                    if (!$sucesso) {
-                        $tentativa++;
-                        if ($tentativa < $maxTentativas) {
-                            sleep(1);
-                        }
-                    }
-                } catch (\Exception $e) {
-                    $tentativa++;
-                    if ($tentativa >= $maxTentativas) {
-                        throw $e;
-                    }
-                    sleep(1);
-                }
-            }
-
-            if (!$sucesso) {
-                throw new \Exception('Erro ao salvar o PDF no S3 após ' . $maxTentativas . ' tentativas');
-            }
-
-            $documento->conteudo_html = $conteudoDecodificado;
+            $documento->path_html = $filenameHtml;
             $documento->save();
 
             return $filename;
         } catch (\Exception $e) {
             throw new \Exception('Erro ao processar documento HTML: ' . $e->getMessage());
         }
+    }
+
+    private function putComRetry(string $path, string $conteudo, string $rotulo): void
+    {
+        $maxTentativas = 3;
+        $tentativa = 0;
+        $sucesso = false;
+
+        while (!$sucesso && $tentativa < $maxTentativas) {
+            try {
+                $sucesso = Storage::disk('s3')->put($path, $conteudo);
+                if (!$sucesso) {
+                    $tentativa++;
+                    if ($tentativa < $maxTentativas) {
+                        sleep(1);
+                    }
+                }
+            } catch (\Exception $e) {
+                $tentativa++;
+                if ($tentativa >= $maxTentativas) {
+                    throw $e;
+                }
+                sleep(1);
+            }
+        }
+
+        if (!$sucesso) {
+            throw new \Exception('Erro ao salvar o ' . $rotulo . ' no S3 após ' . $maxTentativas . ' tentativas');
+        }
+    }
+
+    public function obterConteudoHtml(ProcessoDocumento $documento): ?string
+    {
+        if (!empty($documento->conteudo_html)) {
+            return $documento->conteudo_html;
+        }
+
+        if (empty($documento->path_html)) {
+            return null;
+        }
+
+        $conteudo = Storage::disk('s3')->get($documento->path_html);
+
+        if ($conteudo === null || $conteudo === '') {
+            Log::error('Erro ao ler conteudo HTML do S3', [
+                'documento_id' => $documento->id_documento,
+                'path_html' => $documento->path_html,
+            ]);
+
+            return null;
+        }
+
+        return $conteudo;
     }
 
     public function downloadPDF($documento, $login_pje = null, $senha_pje = null)

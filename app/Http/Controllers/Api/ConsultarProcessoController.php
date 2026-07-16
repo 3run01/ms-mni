@@ -102,7 +102,7 @@ class ConsultarProcessoController extends Controller
                     ->where('tribunal_id', $request->tribunal_id)
                     ->first();
             } else {
-                BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo);
+                BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo, $request->login_pje, $request->senha_pje);
             }
 
             return response()->json($processo);
@@ -132,7 +132,7 @@ class ConsultarProcessoController extends Controller
                 ->paginate(self::DEFAULT_PER_PAGE);
         } else {
             //atualiza o processo em background caso existe
-            BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo);
+            BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo, $request->login_pje, $request->senha_pje);
         }
 
         return response()->json($processos);
@@ -164,6 +164,11 @@ class ConsultarProcessoController extends Controller
 
     public function consultarDadosBasicos(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
         $processo = Processo::with('tribunal', 'classe', 'assuntos', 'prioridades', 'partes.representantesProcessual')
             ->where('numero_processo', $numero_processo)
@@ -178,8 +183,8 @@ class ConsultarProcessoController extends Controller
         $processo = $this->processoService->consultarDadosBasicos(
             Tribunal::find($request->tribunal_id),
             $numero_processo,
-            $request->login_pje ?? null,
-            $request->senha_pje ?? null
+            $request->login_pje,
+            $request->senha_pje
         );
 
         return response()->json($processo);
@@ -187,6 +192,11 @@ class ConsultarProcessoController extends Controller
 
     public function consultarMovimentos(Request $request): JsonResponse
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
         $processo = Processo::with('movimentos')
             ->where('numero_processo', $numero_processo)
@@ -200,8 +210,8 @@ class ConsultarProcessoController extends Controller
         $processo = $this->processoService->consultarMovimentos(
             Tribunal::find($request->tribunal_id),
             $numero_processo,
-            $request->login_pje ?? null,
-            $request->senha_pje ?? null,
+            $request->login_pje,
+            $request->senha_pje,
             $request->data_referencia ?? null,
         );
 
@@ -210,14 +220,34 @@ class ConsultarProcessoController extends Controller
 
     public function consultarDadosBasicosAsync(Request $request)
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+            'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
+            'callback_token' => ['required', 'string', 'max:500'],
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        ConsultarDadosBasicosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
+        ConsultarDadosBasicosProcessoMNIJob::dispatch(
+            $request->tribunal_id, $numero_processo, $request->login_pje, $request->senha_pje,
+            $request->callback_url, $request->callback_token
+        )->onQueue('alta');
     }
 
     public function consultarMovimentosAsync(Request $request)
     {
+        $request->validate([
+            'login_pje' => 'required|string',
+            'senha_pje' => 'required|string',
+            'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
+            'callback_token' => ['required', 'string', 'max:500'],
+        ]);
+
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
-        ConsultarMovimentosProcessoMNIJob::dispatch($request->tribunal_id, $numero_processo)->onQueue('alta');
+        ConsultarMovimentosProcessoMNIJob::dispatch(
+            $request->tribunal_id, $numero_processo, $request->login_pje, $request->senha_pje,
+            $request->callback_url, $request->callback_token
+        )->onQueue('alta');
     }
 
 }

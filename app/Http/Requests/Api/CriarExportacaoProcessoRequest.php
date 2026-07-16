@@ -26,6 +26,8 @@ class CriarExportacaoProcessoRequest extends FormRequest
             'periodo_final' => ['nullable', 'date_format:Y-m-d', 'required_with:periodo_inicial'],
             'id_inicial' => ['nullable', 'integer', 'required_with:id_final'],
             'id_final' => ['nullable', 'integer', 'required_with:id_inicial'],
+            'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
+            'callback_token' => ['required', 'string', 'max:500'],
         ];
     }
 

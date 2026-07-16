@@ -14,9 +14,7 @@ it('pipeline: POST /api/processo/download → PDF → S3 → webhook', function 
     Storage::fake('public');
     Http::fake(['*' => Http::response(['message' => 'OK', 'download_id' => 1], 200)]);
 
-    config()->set('services.api.token', 'tk-test');
-    config()->set('services.sim_webhook_download.url', 'https://sim.test/webhook/download');
-    config()->set('services.sim_webhook_download.token', 'tk-test');
+    criarTokenApi();
     config()->set('queue.default', 'sync');
 
     $numero = '6001255-81.2024.8.03.0003';
@@ -42,6 +40,8 @@ it('pipeline: POST /api/processo/download → PDF → S3 → webhook', function 
             'titulo' => 'Processo X — PDF',
             'formato' => 'pdf',
             'ids_selecionados' => [1],
+            'callback_url' => 'https://example.com/webhook',
+            'callback_token' => 'tok',
         ]);
 
     $response->assertOk();

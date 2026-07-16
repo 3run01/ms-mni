@@ -126,15 +126,6 @@ return [
             // 'encrypt' => env('DB_ENCRYPT', 'yes'),
             // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
         ],
-        'sim' => [
-            'driver' => env('DB_SIM_CONNECTION', 'pgsql'),
-            'host' => env('DB_SIM_HOST', '127.0.0.1'),
-            'port' => env('DB_SIM_PORT', '5432'),
-            'database' => env('DB_SIM_DATABASE', 'sim'),
-            'username' => env('DB_SIM_USERNAME', 'docker'),
-            'password' => env('DB_SIM_PASSWORD', 'docker'),
-        ],
-
     ],
 
     /*

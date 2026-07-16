@@ -41,7 +41,11 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+function criarTokenApi(string $plain = 'tk-test'): \App\Models\ApiToken
 {
-    // ..
+    return \App\Models\ApiToken::create([
+        'name' => 'token-teste-' . \Illuminate\Support\Str::random(8),
+        'token' => \App\Models\ApiToken::hashToken($plain),
+        'ativo' => true,
+    ]);
 }

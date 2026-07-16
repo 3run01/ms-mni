@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Exceptions\MNIException;
+use App\Models\ProcessoDocumento;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -40,14 +41,30 @@ class BaixarDocumentoMNIJob implements ShouldQueue, ShouldBeUnique
     public function handle(): void
     {
         try {
-            $salvarDocumentoProcessoService = new SalvarDocumentoProcessoService();
+            $salvarDocumentoProcessoService = app(SalvarDocumentoProcessoService::class);
             $salvarDocumentoProcessoService->baixarDocumento($this->documento, $this->login_pje, $this->senha_pje);
             $this->documento->tentativas_download++;
             $this->documento->save();
         } catch (MNIException $e) {
-            Log::error('Erro ao baixar documento: ' . $this->documento->id_documento . ' - Processo: ' . $this->documento->processo->numero_processo . ' - ' . $e->getError() . ' - Arquivo: ' . $e->getFile() . ' - Linha: ' . $e->getLine());
+            $this->marcarErro($e->getError() ?: $e->getMessage());
+            throw $e;
         } catch (\Exception $e) {
-            Log::error('Erro ao baixar documento: ' . $this->documento->id_documento . ' - Processo: ' . $this->documento->processo->numero_processo . ' - ' . $e->getMessage() . ' - Arquivo: ' . $e->getFile() . ' - Linha: ' . $e->getLine());
+            $this->marcarErro($e->getMessage());
+            throw $e;
         }
+    }
+
+    /**
+     * Marca o documento como erro (visivel e recuperavel pelo comando
+     * mni:baixar-documento-pendente) e registra a falha. A excecao e
+     * relancada pelo handle() para a fila registrar o job como falho.
+     */
+    private function marcarErro(string $mensagem): void
+    {
+        $this->documento->tentativas_download++;
+        $this->documento->status = ProcessoDocumento::STATUS_ERRO;
+        $this->documento->save();
+
+        Log::error('Erro ao baixar documento: ' . $this->documento->id_documento . ' - ' . $mensagem);
     }
 }

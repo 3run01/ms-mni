@@ -18,26 +18,23 @@ class Tribunal extends Model
     const TIPO_TST = 'Tribunal Superior do Trabalho (TST)';
     const TIPO_TSE = 'Tribunal Superior Eleitoral (TSE)';
 
-    protected $connection = 'sim';
     protected $logName = 'Tribunal';
     protected $table = 'tribunais';
     protected $fillable = [
         'nome',
-        'codigo_tribunal',
-        'segmento_justica',
-        'login',
-        'password',
         'url_webservice_mni',
         'url_webservice_mni_consultar_processo',
         'url_webservice_mni_complementar',
         'url_consulta_pje',
         'url_webservice_mni_criminal',
+        'url_recuperar_senha_tribunal',
         'tipo',
         'ativo',
-        'url_recuperar_senha_tribunal',
         'codigo_peticao_inicial',
         'codigo_peticao_avulsa',
         'codigo_certidao_inicio_fim',
+        'codigo_seeu',
+        'usar_codigo_documento_padrao',
         'enviar_dados_criminais',
         'versao_mni',
     ];
@@ -60,7 +57,14 @@ class Tribunal extends Model
         parent::boot();
 
         static::creating(function ($model) {
-            $model->uuid = Str::uuid();
+            static $temUuid = null;
+            $temUuid ??= $model->getConnection()
+                ->getSchemaBuilder()
+                ->hasColumn($model->getTable(), 'uuid');
+
+            if ($temUuid) {
+                $model->uuid = Str::uuid();
+            }
         });
     }
 
@@ -79,8 +83,8 @@ class Tribunal extends Model
             self::TIPO_TSE
         ];
     }
-    // public function tiposDocumentos()
-    // {
-    //     return $this->hasMany(TipoDocumento::class, 'tribunal_id', 'id');
-    // }
+    public function tiposDocumentos()
+    {
+        return $this->hasMany(TipoDocumento::class, 'tribunal_id', 'id');
+    }
 }

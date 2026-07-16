@@ -6,7 +6,7 @@ use App\Models\Tribunal;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use App\Services\Processo\ProcessoService;
-use Illuminate\Support\Facades\Http;
+use App\Services\Callback\CallbackNotifier;
 
 class ConsultarDadosBasicosProcessoMNIJob implements ShouldQueue
 {
@@ -17,11 +17,15 @@ class ConsultarDadosBasicosProcessoMNIJob implements ShouldQueue
      */
     public $numero_processo;
     public $tribunal_id;
+    public $login_pje;
+    public $senha_pje;
 
-    public function __construct($tribunal_id, $numero_processo)
+    public function __construct($tribunal_id, $numero_processo, $login_pje = null, $senha_pje = null, public ?string $callback_url = null, public ?string $callback_token = null)
     {
         $this->numero_processo = $numero_processo;
         $this->tribunal_id = $tribunal_id;
+        $this->login_pje = $login_pje;
+        $this->senha_pje = $senha_pje;
     }
 
     /**
@@ -29,16 +33,18 @@ class ConsultarDadosBasicosProcessoMNIJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $processoService = new ProcessoService();
+        $processoService = app(ProcessoService::class);
         $processo = $processoService->consultarDadosBasicos(
             Tribunal::find($this->tribunal_id),
             $this->numero_processo,
-            $request->login_pje ?? null,
-            $request->senha_pje ?? null
+            $this->login_pje,
+            $this->senha_pje
         );
 
-
-        Http::timeout(1000)->get(env('SIM_APP_URL')."/webhook/atualizar-processo/{$this->numero_processo}");
-
+        app(CallbackNotifier::class)->notificar($this->callback_url, $this->callback_token, [
+            'numero_processo' => $this->numero_processo,
+            'tipo' => 'dados-basicos',
+            'status' => 'concluido',
+        ]);
     }
 }
