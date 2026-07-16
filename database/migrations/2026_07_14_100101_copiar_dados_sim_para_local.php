@@ -19,7 +19,9 @@ return new class extends Migration
                 $id = $dados['id'];
                 unset($dados['id']);
                 if (empty($dados['uuid'] ?? null)) {
-                    $dados['uuid'] = (string) Str::uuid();
+                    // Preserva o uuid já existente no alvo (idempotência); só gera se ausente.
+                    $dados['uuid'] = DB::connection()->table('tribunais')->where('id', $id)->value('uuid')
+                        ?: (string) Str::uuid();
                 }
                 DB::connection()->table('tribunais')->updateOrInsert(['id' => $id], $dados);
             }
