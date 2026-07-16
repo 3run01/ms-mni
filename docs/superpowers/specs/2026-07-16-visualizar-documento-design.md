@@ -32,7 +32,7 @@ Em `resources/js/pages/processos/show.tsx`:
 
 - Nova coluna de ações (header vazio) na tabela de documentos: botão ghost com ícone `Eye` (lucide), `aria-label="Visualizar documento"`, renderizado apenas quando `doc.status === 'baixado'`.
 - `Dialog` (shadcn) com `max-w-4xl` e conteúdo de ~85vh de altura; título = `doc.descricao` (fallback: tipo/`—`).
-- Corpo do modal: `<iframe sandbox src={/processos/${processo.id}/documentos/${doc.id}}>` ocupando toda a área.
+- Corpo do modal: `<iframe src={/processos/${processo.id}/documentos/${doc.id}}>` ocupando toda a área. O atributo `sandbox` é aplicado **apenas quando `doc.mimetype === 'text/html'`** (isola scripts do HTML vindo do tribunal); iframes sandboxed bloqueiam o viewer nativo de PDF no Chrome, então PDFs usam iframe sem sandbox.
 - Estado local: `docAberto: DocumentoItem | null`; fechar modal limpa o estado.
 
 ### Erros
