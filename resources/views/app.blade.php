@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
 
-    <title inertia>{{ config('app.name', 'SIM-MNI') }}</title>
+    <title inertia>{{ config('app.name', 'MNI') }}</title>
 
     {{-- Detecta preferência dark do sistema e aplica antes do primeiro paint --}}
     <script>

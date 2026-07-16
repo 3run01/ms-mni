@@ -36,7 +36,6 @@ export default function TokensCreate() {
                             id="name"
                             value={data.name}
                             onChange={(e) => setData('name', e.target.value)}
-                            placeholder="ex.: clickpdv"
                             autoFocus
                         />
                         {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}

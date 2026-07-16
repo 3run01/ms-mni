@@ -17,11 +17,9 @@ class ConsultarClasseJudicialService
             throw new MNIException('Informe o código da jurisdição.', 422);
         }
 
-
         $payload = [
             "arg0" => ["id" => $jurisdicao_codigo]
         ];
-
 
         $integracao = new IntegracaoBase($url);
         $retorno = $integracao->makeSoapRequest('consultarClassesJudiciais', $payload);

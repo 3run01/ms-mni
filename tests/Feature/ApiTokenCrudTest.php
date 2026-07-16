@@ -38,7 +38,7 @@ it('renderiza o formulário de criação', function () {
 
 it('cria token, persiste hash e flasha o plaintext uma única vez', function () {
     $response = $this->actingAs(usuarioLogado())
-        ->post('/tokens', ['name' => 'clickpdv', 'expires_at' => null]);
+        ->post('/tokens', ['name' => 'teste 1', 'expires_at' => null]);
 
     $response->assertRedirect(route('tokens.index'))
         ->assertSessionHas('success')
@@ -47,7 +47,7 @@ it('cria token, persiste hash e flasha o plaintext uma única vez', function () 
     $plain = session('token');
     expect($plain)->toStartWith('mni_')->toHaveLength(52);
 
-    $registro = ApiToken::where('name', 'clickpdv')->first();
+    $registro = ApiToken::where('name', 'teste 1')->first();
     expect($registro)->not->toBeNull();
     expect($registro->token)->toBe(ApiToken::hashToken($plain));
     expect($registro->ativo)->toBeTrue();
