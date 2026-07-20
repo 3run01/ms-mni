@@ -51,4 +51,7 @@ Route::middleware('auth:web')->group(function () {
 
     Route::get('/processos', [ProcessoController::class, 'index'])->name('processos.index');
     Route::get('/processos/{processo}', [ProcessoController::class, 'show'])->name('processos.show');
+    Route::get('/processos/{processo}/documentos/{documento}', [ProcessoController::class, 'documento'])
+        ->name('processos.documento')
+        ->scopeBindings();
 });

@@ -4,10 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Models\ClasseCNJ;
 use App\Models\Processo;
+use App\Models\ProcessoDocumento;
 use App\Models\Tribunal;
 use App\Models\ProcessoParte;
 use App\Models\ProcessoParteRepresentante;
+use App\Services\Processo\SalvarDocumentoProcessoService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -175,5 +179,32 @@ class ProcessoController extends Controller
                     'status' => $d->status,
                 ])),
         ]);
+    }
+
+    public function documento(Processo $processo, ProcessoDocumento $documento, SalvarDocumentoProcessoService $service)
+    {
+        abort_if($documento->status !== ProcessoDocumento::STATUS_BAIXADO, 404);
+
+        if ($documento->mimetype === 'text/html') {
+            $html = $service->obterConteudoHtml($documento);
+            abort_if($html === null, 404);
+
+            return response($html)->header('Content-Type', 'text/html; charset=utf-8');
+        }
+
+        $path = $documento->getRawOriginal('path');
+        abort_if(empty($path) || !Storage::disk('s3')->exists($path), 404);
+
+        try {
+            return redirect()->away(
+                Storage::disk('s3')->temporaryUrl($path, now()->addMinutes(60))
+            );
+        } catch (\Exception $e) {
+            Log::error('Erro ao gerar URL temporária para visualizar documento', [
+                'documento_id' => $documento->id,
+                'error' => $e->getMessage(),
+            ]);
+            abort(404);
+        }
     }
 }
