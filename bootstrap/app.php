@@ -12,6 +12,11 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // Atrás de reverse proxy (Traefik/Coolify) que termina TLS: sem isso,
+        // o Laravel ignora X-Forwarded-Proto e gera URLs http:// em páginas https
+        // (mixed content bloqueado pelo browser, ex.: spec-url do Redoc).
+        $middleware->trustProxies(at: '*');
+
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
         $middleware->web(append: [
