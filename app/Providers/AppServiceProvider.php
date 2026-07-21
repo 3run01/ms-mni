@@ -38,7 +38,8 @@ class AppServiceProvider extends ServiceProvider
             ]);
         }
 
-        if (env('FORCE_HTTPS') === true) {
+        // env() aqui retornaria null com config cacheada (config:cache em produção)
+        if (config('app.force_https')) {
             URL::forceScheme('https');
         }
 
