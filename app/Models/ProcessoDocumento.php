@@ -25,6 +25,7 @@ class ProcessoDocumento extends Model
         'usuario_juntada_arquivo',
         'data_juntada',
         'status',
+        'downloaded_at',
         'url',
         'path',
         'path_html',
@@ -35,6 +36,7 @@ class ProcessoDocumento extends Model
 
     protected $casts = [
         'id_documento' => 'integer',
+        'downloaded_at' => 'datetime',
     ];
 
     protected $hidden = [
