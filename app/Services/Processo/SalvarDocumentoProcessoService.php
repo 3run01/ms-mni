@@ -121,9 +121,7 @@ class SalvarDocumentoProcessoService
 
         // Verifica se o documento foi baixado com sucesso
         if ($path && Storage::disk('s3')->exists($path)) {
-            $documento->status = ProcessoDocumento::STATUS_BAIXADO;
-            $documento->path = $path;
-            $documento->save();
+            $this->marcarComoBaixado($documento, $path);
 
             // Recarrega o documento do banco para garantir dados atualizados
             return ProcessoDocumento::find($documento->id);
@@ -135,6 +133,19 @@ class SalvarDocumentoProcessoService
         //     $documento->save();
         //     throw new \Exception('Erro ao baixar documento: ' . $e->getMessage());
         // }
+    }
+
+    public function marcarComoBaixado(ProcessoDocumento $documento, string $path, ?int $fileSize = null): void
+    {
+        $documento->status = ProcessoDocumento::STATUS_BAIXADO;
+        $documento->path = $path;
+        $documento->downloaded_at = now();
+
+        if ($fileSize !== null) {
+            $documento->file_size = $fileSize;
+        }
+
+        $documento->save();
     }
 
     public function downloadHTML($documento, $login_pje = null, $senha_pje = null)
@@ -459,11 +470,7 @@ class SalvarDocumentoProcessoService
                 throw new \Exception('Erro ao salvar o MP4 no S3');
             }
 
-            // Atualizar documento
-            $documento->file_size = $fileSize;
-            $documento->status = ProcessoDocumento::STATUS_BAIXADO;
-            $documento->path = $filename;
-            $documento->save();
+            $this->marcarComoBaixado($documento, $filename, $fileSize);
 
             @unlink($tempFile);
 
@@ -586,11 +593,7 @@ class SalvarDocumentoProcessoService
                 throw new \Exception('Erro ao salvar o QuickTime no S3');
             }
 
-            // Atualizar documento
-            $documento->file_size = $fileSize;
-            $documento->status = ProcessoDocumento::STATUS_BAIXADO;
-            $documento->path = $filename;
-            $documento->save();
+            $this->marcarComoBaixado($documento, $filename, $fileSize);
 
             @unlink($tempFile);
 
