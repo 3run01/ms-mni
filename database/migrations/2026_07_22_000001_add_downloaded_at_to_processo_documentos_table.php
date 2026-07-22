@@ -27,7 +27,7 @@ return new class extends Migration
         while (true) {
             $affected = DB::update("
                 UPDATE processo_documentos
-                SET downloaded_at = updated_at
+                SET downloaded_at = COALESCE(updated_at, created_at, NOW())
                 WHERE id IN (
                     SELECT id FROM processo_documentos
                     WHERE status = 'baixado' AND downloaded_at IS NULL
