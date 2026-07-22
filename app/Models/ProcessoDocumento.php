@@ -45,6 +45,7 @@ class ProcessoDocumento extends Model
         'created_at',
         'updated_at',
         'deleted_at',
+        'downloaded_at',
         'baixado',
         'url',
         'path',
