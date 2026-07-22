@@ -35,7 +35,7 @@
 - Consumes: tabela `processo_documentos` existente (coluna `status` com valores `baixado|pendente|erro`).
 - Produces: coluna `processo_documentos.downloaded_at` (timestamp nullable, indexada), cast `datetime` no model. Tasks 2 e 3 dependem dela.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Criar `tests/Feature/Migrations/DownloadedAtTest.php`:
 
@@ -49,12 +49,12 @@ it('processo_documentos tem a coluna downloaded_at', function () {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec php ./vendor/bin/pest tests/Feature/Migrations/DownloadedAtTest.php`
 Expected: FAIL — `Failed asserting that false is true`.
 
-- [ ] **Step 3: Write the migration**
+- [x] **Step 3: Write the migration**
 
 Criar `database/migrations/2026_07_22_000001_add_downloaded_at_to_processo_documentos_table.php`:
 
@@ -93,12 +93,12 @@ return new class extends Migration
 };
 ```
 
-- [ ] **Step 4: Run the migration**
+- [x] **Step 4: Run the migration**
 
 Run: `docker compose exec php php artisan migrate`
 Expected: `2026_07_22_000001_add_downloaded_at_to_processo_documentos_table ... DONE`
 
-- [ ] **Step 5: Add fillable + cast no model**
+- [x] **Step 5: Add fillable + cast no model**
 
 Em `app/Models/ProcessoDocumento.php`:
 
@@ -117,12 +117,12 @@ No array `$casts`, virar:
     ];
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `docker compose exec php ./vendor/bin/pest tests/Feature/Migrations/DownloadedAtTest.php`
 Expected: PASS (1 test).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add database/migrations/2026_07_22_000001_add_downloaded_at_to_processo_documentos_table.php app/Models/ProcessoDocumento.php tests/Feature/Migrations/DownloadedAtTest.php
@@ -143,7 +143,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: coluna `downloaded_at` (Task 1); `ProcessoDocumento::STATUS_BAIXADO`.
 - Produces: `public function marcarComoBaixado(ProcessoDocumento $documento, string $path, ?int $fileSize = null): void` — seta `status`, `path`, `downloaded_at = now()`, opcionalmente `file_size`, e salva. Task 3 conta docs por `downloaded_at`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Criar `tests/Feature/SalvarDocumentoDownloadedAtTest.php`:
 
@@ -201,12 +201,12 @@ it('marcarComoBaixado sem fileSize preserva file_size existente', function () {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec php ./vendor/bin/pest tests/Feature/SalvarDocumentoDownloadedAtTest.php`
 Expected: FAIL — `Call to undefined method ... marcarComoBaixado()`.
 
-- [ ] **Step 3: Implement helper + trocar os 3 call sites**
+- [x] **Step 3: Implement helper + trocar os 3 call sites**
 
 Em `app/Services/Processo/SalvarDocumentoProcessoService.php`, adicionar método público (logo após `baixarDocumento`):
 
@@ -259,17 +259,17 @@ por:
 
 Call site 3 — no download de QuickTime (~linha 589): mesma troca do call site 2 (o bloco é idêntico).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `docker compose exec php ./vendor/bin/pest tests/Feature/SalvarDocumentoDownloadedAtTest.php`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Reiniciar workers (código de job mudou)**
+- [x] **Step 5: Reiniciar workers (código de job mudou)**
 
 Run: `docker compose exec php php artisan horizon:terminate`
 Expected: sem erro (supervisord reinicia o Horizon sozinho).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/Services/Processo/SalvarDocumentoProcessoService.php tests/Feature/SalvarDocumentoDownloadedAtTest.php
@@ -298,7 +298,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   ```
   Task 4 expõe esse array como prop `metricas`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Criar `tests/Feature/DashboardMetricasServiceTest.php`:
 
@@ -385,12 +385,12 @@ it('suporta períodos 30 e 90', function () {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec php ./vendor/bin/pest tests/Feature/DashboardMetricasServiceTest.php`
 Expected: FAIL — `Class "App\Services\Dashboard\DashboardMetricasService" not found`.
 
-- [ ] **Step 3: Implement the service**
+- [x] **Step 3: Implement the service**
 
 Criar `app/Services/Dashboard/DashboardMetricasService.php`:
 
@@ -465,12 +465,12 @@ class DashboardMetricasService
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `docker compose exec php ./vendor/bin/pest tests/Feature/DashboardMetricasServiceTest.php`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/Services/Dashboard/DashboardMetricasService.php tests/Feature/DashboardMetricasServiceTest.php
@@ -492,7 +492,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: `DashboardMetricasService::metricas(int): array` (Task 3).
 - Produces: rota `GET /dashboard` (name `dashboard`, middleware `auth:web` inalterado) com props Inertia: `periodo` (int, direto) e `metricas` (deferred, shape da Task 3). Task 6 consome essas props.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Em `tests/Feature/DashboardTest.php`, adicionar no topo (depois dos `use` existentes):
 
@@ -556,12 +556,12 @@ it('entrega metricas no partial reload com o shape esperado', function () {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec php ./vendor/bin/pest tests/Feature/DashboardTest.php`
 Expected: os 2 testes antigos PASSAM; os 4 novos FALHAM (prop `periodo` inexistente).
 
-- [ ] **Step 3: Implement controller + rota**
+- [x] **Step 3: Implement controller + rota**
 
 Criar `app/Http/Controllers/DashboardController.php`:
 
@@ -618,12 +618,12 @@ por:
 
 (Se o import `use Inertia\Inertia;` ficar sem uso no arquivo, removê-lo.)
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `docker compose exec php ./vendor/bin/pest tests/Feature/DashboardTest.php`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/Http/Controllers/DashboardController.php routes/web.php tests/Feature/DashboardTest.php
@@ -645,7 +645,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: alias `@/lib/utils` (`cn`) já existente; tema light/dark via classe `.dark`.
 - Produces: pacote `recharts`; componentes `ChartContainer`, `ChartTooltip`, `ChartTooltipContent`, tipo `ChartConfig` exportados de `@/components/ui/chart`; CSS vars `--chart-1`, `--chart-2` (e `--color-chart-1/2` no @theme). Task 6 usa tudo isso.
 
-- [ ] **Step 1: Instalar recharts (npm roda no host)**
+- [x] **Step 1: Instalar recharts (npm roda no host)**
 
 ```bash
 npm install recharts
@@ -653,7 +653,7 @@ npm install recharts
 
 Expected: `recharts` em `dependencies` no package.json, sem erros de peer deps (React 19 é suportado pelo recharts ≥ 2.13).
 
-- [ ] **Step 2: Baixar o chart.tsx do registry shadcn (CLI está quebrado neste ambiente)**
+- [x] **Step 2: Baixar o chart.tsx do registry shadcn (CLI está quebrado neste ambiente)**
 
 ```bash
 curl -s https://ui.shadcn.com/r/styles/new-york-v4/chart.json -o /tmp/claude-1000/-home-bruno-projetos-ms-mni/51b80cda-c48f-44a1-aea6-447ff7decd44/scratchpad/chart.json
@@ -665,7 +665,7 @@ Expected: arquivo começa com `"use client"` / imports de `recharts`. Se a prime
 
 Fallback se o registry estiver fora do ar ou o shape do JSON mudar: baixar de `https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/chart.tsx`.
 
-- [ ] **Step 3: Adicionar CSS vars de gráfico**
+- [x] **Step 3: Adicionar CSS vars de gráfico**
 
 Em `resources/css/app.css`:
 
@@ -691,12 +691,12 @@ Dentro do bloco `.dark { ... }`, adicionar:
     --chart-2: #059669;
 ```
 
-- [ ] **Step 4: Typecheck**
+- [x] **Step 4: Typecheck**
 
 Run: `npm run typecheck`
 Expected: sem erros (chart.tsx compila contra recharts instalado).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json package-lock.json resources/js/components/ui/chart.tsx resources/css/app.css
@@ -716,7 +716,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: props `periodo: number` e `metricas?: Metricas` (Task 4); `ChartContainer/ChartTooltip/ChartTooltipContent/ChartConfig` (Task 5); `Card`, `Button`, `Skeleton` de `@/components/ui`; `Deferred` do Inertia (mesmo padrão de `resources/js/pages/processos/show.tsx:187`).
 - Produces: página `dashboard` final. Nenhuma task posterior depende dela (Task 7 só verifica).
 
-- [ ] **Step 1: Reescrever dashboard.tsx**
+- [x] **Step 1: Reescrever dashboard.tsx**
 
 Substituir todo o conteúdo de `resources/js/pages/dashboard.tsx` por:
 
@@ -922,17 +922,17 @@ export default function Dashboard({ periodo, metricas }: { periodo: number; metr
 
 Nota: `<Deferred>` exige children como função ou elemento conforme a versão — se o typecheck reclamar de `{metricas && ...}`, seguir o padrão exato de `resources/js/pages/processos/show.tsx:187-210` (que já compila neste projeto).
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `npm run typecheck`
 Expected: sem erros.
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 Run: `npm run build`
 Expected: build Vite conclui sem erro (bundle inclui recharts).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add resources/js/pages/dashboard.tsx
@@ -950,12 +950,12 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: tudo das Tasks 1-6; app em `http://localhost:8006` (container `php` já up); credenciais de login em `database/seeders/UserSeeder.php`.
 
-- [ ] **Step 1: Suíte completa de testes**
+- [x] **Step 1: Suíte completa de testes**
 
 Run: `docker compose exec php ./vendor/bin/pest`
 Expected: apenas as **9 falhas pré-existentes** do domínio exportação (ExportacaoProcessoServiceTest, DownloadProcessoControllerTest, ExportacaoPipelineTest). Qualquer falha NOVA é regressão — investigar antes de seguir.
 
-- [ ] **Step 2: Verificação visual no browser (Playwright MCP)**
+- [x] **Step 2: Verificação visual no browser (Playwright MCP)**
 
 1. Navegar para `http://localhost:8006/dashboard` (redireciona pro login).
 2. Logar com as credenciais do `database/seeders/UserSeeder.php`.
@@ -966,7 +966,7 @@ Expected: apenas as **9 falhas pré-existentes** do domínio exportação (Expor
 
 Avisos do ambiente (memória do projeto): NÃO usar `page.setViewportSize` em `run_code` (corrompe o input pipeline — usar `browser_resize`); se um clique estourar timeout de 30s, recovery = `browser_close` + `browser_navigate`.
 
-- [ ] **Step 3: Atualizar plano com checkboxes e commit final**
+- [x] **Step 3: Atualizar plano com checkboxes e commit final**
 
 Marcar checkboxes concluídos neste arquivo e:
 
