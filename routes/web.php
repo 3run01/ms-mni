@@ -2,10 +2,10 @@
 
 use App\Http\Controllers\ApiTokenController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProcessoController;
 use App\Http\Controllers\TribunalController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 // Rotas públicas
 Route::get('/', function () {
@@ -32,9 +32,7 @@ Route::middleware('guest')->group(function () {
 
 Route::middleware('auth:web')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
-    Route::get('/dashboard', function () {
-        return Inertia::render('dashboard');
-    })->name('dashboard');
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     Route::get('/tribunais', [TribunalController::class, 'index'])->name('tribunais.index');
     Route::get('/tribunais/criar', [TribunalController::class, 'create'])->name('tribunais.create');
