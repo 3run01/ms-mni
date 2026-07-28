@@ -48,9 +48,9 @@ return [
 
 1. Se a requisição traz `login_pje` **e** `senha_pje` preenchidos (`$request->filled()`), não altera nada.
 2. Caso contrário, se `config('pje.credenciais_padrao.login')` **e** `...senha` estão preenchidos, faz `$request->merge()` injetando o par completo — substituindo qualquer valor parcial que tenha vindo na requisição.
-3. Caso contrário, não altera nada. Os controllers passam `null` adiante e o fallback do tribunal, já existente nos services, decide.
+3. Caso contrário, zera as duas credenciais (`null`). Os controllers passam `null` adiante e o fallback do tribunal, já existente nos services, decide.
 
-O par é atômico: uma requisição com apenas `login_pje` recebe o par inteiro do `.env`, evitando a combinação login-do-cliente + senha-do-servidor.
+O par é atômico em todas as camadas: uma requisição com apenas `login_pje` recebe o par inteiro do `.env` e, se não houver par padrão, tem as duas credenciais descartadas. Zerar o par no passo 3 é o que impede a combinação login-do-cliente + senha-do-tribunal — os services resolvem cada campo com um `??` independente (`$login_pje ?? $tribunal->login`), então deixar um `login_pje` solto passar produziria exatamente essa mistura.
 
 Todos os endpoints afetados são `GET` com query params; `$request->merge()` alimenta `$request->input()`, que é o que o acesso mágico `$request->login_pje` usa.
 
