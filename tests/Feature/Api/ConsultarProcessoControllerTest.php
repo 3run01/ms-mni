@@ -111,6 +111,21 @@ it('visualizar sem credenciais e sem par padrao repassa null ao ProcessoService'
         ->assertOk();
 });
 
+it('visualizar processo existente sem credenciais agenda refresh com o par padrao do .env', function () {
+    Queue::fake();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/visualizar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
+        ->assertOk();
+
+    Queue::assertPushed(
+        BaixarProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'env-login' && $job->senha_pje === 'env-senha'
+    );
+});
+
 it('visualizar com credenciais e processo existente retorna 200', function () {
     Queue::fake();
     criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
@@ -150,7 +165,7 @@ it('visualizar com processo inexistente repassa credenciais ao ProcessoService',
         ->assertOk();
 });
 
-// ---------- endpoints que agora EXIGEM credenciais ----------
+// ---------- endpoints com credenciais opcionais ----------
 
 it('dados-basicos sem credenciais usa o par padrao do .env', function () {
     definirCredenciaisPadrao('env-login', 'env-senha');

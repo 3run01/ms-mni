@@ -28,13 +28,14 @@ class InjectCredenciaisPjePadrao
 
         $login = config('pje.credenciais_padrao.login');
         $senha = config('pje.credenciais_padrao.senha');
+        $temPadrao = filled($login) && filled($senha);
 
-        if (filled($login) && filled($senha)) {
-            $request->merge([
-                'login_pje' => $login,
-                'senha_pje' => $senha,
-            ]);
-        }
+        // par incompleto na requisição é descartado inteiro: sem par padrão,
+        // as duas credenciais viram null e o fallback do tribunal decide.
+        $request->merge([
+            'login_pje' => $temPadrao ? $login : null,
+            'senha_pje' => $temPadrao ? $senha : null,
+        ]);
 
         return $next($request);
     }

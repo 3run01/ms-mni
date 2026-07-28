@@ -272,12 +272,20 @@ it('show retorna 404 apos maxTentativas quando o documento nunca resolve link (s
     expect($chamadas)->toBe(3);
 });
 
-it('visualizar sem credenciais responde 200 usando o par padrao do .env', function () {
+it('visualizar sem credenciais usa o par padrao do .env', function () {
     fakeS3ComLinks();
     definirCredenciaisPadrao('env-login', 'env-senha');
     $numero = 'VISENV' . getmypid();
-    criarDocumentoVisualizar($numero, 930010);
+    $documento = criarDocumentoVisualizar($numero, 930010);
     Storage::disk('s3')->put("documentos-processos/{$numero}/930010.pdf", 'pdf-fake');
+
+    // baixarDocumento é o ponto onde as credenciais chegam no download do MNI
+    $this->partialMock(\App\Services\Processo\SalvarDocumentoProcessoService::class, function ($mock) use ($documento) {
+        $mock->shouldReceive('baixarDocumento')
+            ->once()
+            ->withArgs(fn ($doc, $login, $senha) => $login === 'env-login' && $senha === 'env-senha')
+            ->andReturn($documento);
+    });
 
     $this->withHeaders(['X-API-Token' => 'tk-test'])
         ->getJson("/api/documento/visualizar?tribunal_id=999999&numero_processo={$numero}&id_documento=930010")

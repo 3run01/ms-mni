@@ -15,6 +15,7 @@ beforeEach(function () {
     // handle() notifica o callback do chamador via CallbackNotifier (Http::post); nunca deve sair para a rede real.
     Http::fake();
     criarTokenApi();
+    definirCredenciaisPadrao(null, null);
 });
 
 it('ConsultarDadosBasicosProcessoMNIJob::handle() repassa login_pje/senha_pje para consultarDadosBasicos', function () {
