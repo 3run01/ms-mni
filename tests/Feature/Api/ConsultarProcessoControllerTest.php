@@ -12,6 +12,8 @@ uses(DatabaseTransactions::class);
 
 beforeEach(function () {
     criarTokenApi();
+    // isola do .env da máquina: cada teste declara o par padrão que quer
+    definirCredenciaisPadrao(null, null);
 });
 
 function criarProcessoParaConsulta(string $numero, int $tribunalId = 1): Processo
@@ -25,21 +27,49 @@ function criarProcessoParaConsulta(string $numero, int $tribunalId = 1): Process
 
 // ---------- GET /api/processo/consultar ----------
 
-it('consultar sem login_pje e senha_pje retorna 422', function () {
-    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/consultar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003');
+it('consultar sem credenciais usa o par padrao do .env', function () {
+    Queue::fake();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
 
-    $response->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/consultar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
+        ->assertOk();
+
+    Queue::assertPushed(
+        BaixarProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'env-login' && $job->senha_pje === 'env-senha'
+    );
 });
 
-it('consultar com login_pje mas sem senha_pje retorna 422', function () {
-    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/consultar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=usuario');
+it('consultar com par incompleto usa o par padrao do .env inteiro', function () {
+    Queue::fake();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
 
-    $response->assertStatus(422)
-        ->assertJsonValidationErrors(['senha_pje'])
-        ->assertJsonMissingValidationErrors(['login_pje']);
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/consultar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=usuario')
+        ->assertOk();
+
+    Queue::assertPushed(
+        BaixarProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'env-login' && $job->senha_pje === 'env-senha'
+    );
+});
+
+it('consultar com credenciais na requisicao ignora o par padrao do .env', function () {
+    Queue::fake();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/consultar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&login_pje=req-login&senha_pje=req-senha')
+        ->assertOk();
+
+    Queue::assertPushed(
+        BaixarProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'req-login' && $job->senha_pje === 'req-senha'
+    );
 });
 
 it('consultar com credenciais e processo existente retorna 200 e agenda refresh', function () {
@@ -69,14 +99,16 @@ it('consultar com processo inexistente repassa credenciais ao ProcessoService', 
 
 // ---------- GET /api/processo/visualizar ----------
 
-it('visualizar sem credenciais retorna 422 mesmo com processo em banco', function () {
-    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
+it('visualizar sem credenciais e sem par padrao repassa null ao ProcessoService', function () {
+    $this->mock(ProcessoService::class, function ($mock) {
+        $mock->shouldReceive('consultarNumero')
+            ->once()
+            ->withArgs(fn ($tribunal, $numero, $login, $senha) => $login === null && $senha === null);
+    });
 
-    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/visualizar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003');
-
-    $response->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/visualizar?tribunal_id=1&numero_processo=9999999-99.2024.8.03.9999')
+        ->assertOk();
 });
 
 it('visualizar com credenciais e processo existente retorna 200', function () {
@@ -120,13 +152,19 @@ it('visualizar com processo inexistente repassa credenciais ao ProcessoService',
 
 // ---------- endpoints que agora EXIGEM credenciais ----------
 
-it('dados-basicos sem credenciais retorna 422', function () {
-    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
+it('dados-basicos sem credenciais usa o par padrao do .env', function () {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
+    $this->mock(ProcessoService::class, function ($mock) {
+        $mock->shouldReceive('consultarDadosBasicos')
+            ->once()
+            ->withArgs(fn ($tribunal, $numero, $login, $senha) => $login === 'env-login' && $senha === 'env-senha')
+            ->andReturn(new Processo());
+    });
 
     $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/dados-basicos?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
+        ->getJson('/api/processo/dados-basicos?tribunal_id=1&numero_processo=9999999-99.2024.8.03.9999')
+        ->assertOk();
 });
 
 it('dados-basicos repassa credenciais do payload ao ProcessoService', function () {
@@ -142,13 +180,21 @@ it('dados-basicos repassa credenciais do payload ao ProcessoService', function (
         ->assertOk();
 });
 
-it('movimentos sem credenciais retorna 422', function () {
-    criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
+it('movimentos sem credenciais usa o par padrao do .env', function () {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+    $processo = criarProcessoParaConsulta('0600125-81.2024.8.03.0003');
+    $processo->setRelation('movimentos', collect());
+
+    $this->mock(ProcessoService::class, function ($mock) use ($processo) {
+        $mock->shouldReceive('consultarMovimentos')
+            ->once()
+            ->withArgs(fn ($tribunal, $numero, $login, $senha, $dataRef) => $login === 'env-login' && $senha === 'env-senha')
+            ->andReturn($processo);
+    });
 
     $this->withHeaders(['X-API-Token' => 'tk-test'])
         ->getJson('/api/processo/movimentos/listar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
+        ->assertOk();
 });
 
 it('movimentos repassa credenciais do payload ao ProcessoService', function () {
@@ -169,11 +215,28 @@ it('movimentos repassa credenciais do payload ao ProcessoService', function () {
 
 // ---------- endpoints async ----------
 
-it('dados-basicos async sem credenciais retorna 422', function () {
+it('dados-basicos async sem credenciais despacha job com o par padrao do .env', function () {
+    Queue::fake();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/consultar/dados-basicos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&callback_url=https://example.com/webhook&callback_token=tok-x')
+        ->assertOk();
+
+    Queue::assertPushed(
+        ConsultarDadosBasicosProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'env-login' && $job->senha_pje === 'env-senha'
+    );
+});
+
+it('dados-basicos async sem callback continua retornando 422', function () {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
     $this->withHeaders(['X-API-Token' => 'tk-test'])
         ->getJson('/api/processo/consultar/dados-basicos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
         ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
+        ->assertJsonValidationErrors(['callback_url', 'callback_token'])
+        ->assertJsonMissingValidationErrors(['login_pje', 'senha_pje']);
 });
 
 it('dados-basicos async despacha job com as credenciais do payload', function () {
@@ -190,11 +253,18 @@ it('dados-basicos async despacha job com as credenciais do payload', function ()
     );
 });
 
-it('movimentos async sem credenciais retorna 422', function () {
+it('movimentos async sem credenciais despacha job com o par padrao do .env', function () {
+    Queue::fake();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
     $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/consultar/movimentos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
+        ->getJson('/api/processo/consultar/movimentos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&callback_url=https://example.com/webhook&callback_token=tok-x')
+        ->assertOk();
+
+    Queue::assertPushed(
+        ConsultarMovimentosProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'env-login' && $job->senha_pje === 'env-senha'
+    );
 });
 
 it('movimentos async despacha job com as credenciais do payload', function () {
