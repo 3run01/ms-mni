@@ -49,3 +49,9 @@ function criarTokenApi(string $plain = 'tk-test'): \App\Models\ApiToken
         'ativo' => true,
     ]);
 }
+
+function definirCredenciaisPadrao(?string $login, ?string $senha): void
+{
+    config()->set('pje.credenciais_padrao.login', $login);
+    config()->set('pje.credenciais_padrao.senha', $senha);
+}

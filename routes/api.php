@@ -7,13 +7,14 @@ use App\Http\Controllers\Api\ConsultarProcessoController;
 use App\Http\Controllers\Api\DocumentoController;
 use App\Http\Controllers\Api\DownloadProcessoController;
 use App\Http\Controllers\Api\TribunalController;
+use App\Http\Middleware\InjectCredenciaisPjePadrao;
 use App\Http\Middleware\ValidateApiToken;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
 })->middleware('auth:sanctum');
 
-Route::middleware(ValidateApiToken::class)->group(function () {
+Route::middleware([ValidateApiToken::class, InjectCredenciaisPjePadrao::class])->group(function () {
     Route::get('/processo/consultar', [ConsultarProcessoController::class, 'index']);
     Route::get('/processo/visualizar', [ConsultarProcessoController::class, 'show']);
 

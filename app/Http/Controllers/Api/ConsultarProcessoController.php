@@ -31,8 +31,8 @@ class ConsultarProcessoController extends Controller
     public function index(Request $request): JsonResponse
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
         ]);
 
         try {
@@ -55,8 +55,8 @@ class ConsultarProcessoController extends Controller
     public function show(Request $request): JsonResponse
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
         ]);
 
         try {
@@ -165,8 +165,8 @@ class ConsultarProcessoController extends Controller
     public function consultarDadosBasicos(Request $request): JsonResponse
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
         ]);
 
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
@@ -193,8 +193,8 @@ class ConsultarProcessoController extends Controller
     public function consultarMovimentos(Request $request): JsonResponse
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
         ]);
 
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
@@ -221,8 +221,8 @@ class ConsultarProcessoController extends Controller
     public function consultarDadosBasicosAsync(Request $request)
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
             'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
             'callback_token' => ['required', 'string', 'max:500'],
         ]);
@@ -237,8 +237,8 @@ class ConsultarProcessoController extends Controller
     public function consultarMovimentosAsync(Request $request)
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
             'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
             'callback_token' => ['required', 'string', 'max:500'],
         ]);

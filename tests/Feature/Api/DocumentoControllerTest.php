@@ -13,33 +13,76 @@ uses(DatabaseTransactions::class);
 
 beforeEach(function () {
     criarTokenApi();
+    definirCredenciaisPadrao(null, null);
 });
 
-it('documento visualizar sem credenciais retorna 422', function () {
-    $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/documento/visualizar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&id_documento=123')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
-});
+it('documentos listar sem credenciais usa o par padrao do .env', function () {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+    $numero = 'LISTENV' . getmypid();
 
-it('documentos listar sem credenciais retorna 422', function () {
-    Processo::create([
-        'numero_processo' => cleanNumeroProcesso('0600125-81.2024.8.03.0003'),
-        'tribunal_id' => 1,
+    $processo = Processo::create([
+        'numero_processo' => $numero,
+        'tribunal_id' => 999999,
         'valor_causa' => '0.00',
     ]);
+    $processo->setRelation('documentos', collect());
+
+    $this->mock(\App\Services\Processo\ProcessoService::class, function ($mock) use ($processo) {
+        $mock->shouldReceive('consultarDocumentos')
+            ->once()
+            ->withArgs(fn ($tribunal, $num, $login, $senha, $dataRef) => $login === 'env-login' && $senha === 'env-senha')
+            ->andReturn($processo);
+    });
 
     $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson('/api/processo/documentos/listar?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
+        ->getJson("/api/processo/documentos/listar?tribunal_id=999999&numero_processo={$numero}")
+        ->assertOk();
 });
 
-it('documentos async sem credenciais retorna 422', function () {
+it('documentos listar sem credenciais e sem par padrao repassa null ao ProcessoService', function () {
+    $numero = 'LISTNULL' . getmypid();
+
+    $processo = Processo::create([
+        'numero_processo' => $numero,
+        'tribunal_id' => 999999,
+        'valor_causa' => '0.00',
+    ]);
+    $processo->setRelation('documentos', collect());
+
+    $this->mock(\App\Services\Processo\ProcessoService::class, function ($mock) use ($processo) {
+        $mock->shouldReceive('consultarDocumentos')
+            ->once()
+            ->withArgs(fn ($tribunal, $num, $login, $senha, $dataRef) => $login === null && $senha === null)
+            ->andReturn($processo);
+    });
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson("/api/processo/documentos/listar?tribunal_id=999999&numero_processo={$numero}")
+        ->assertOk();
+});
+
+it('documentos async sem credenciais despacha job com o par padrao do .env', function () {
+    Queue::fake();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson('/api/processo/consultar/documentos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003&callback_url=https://example.com/webhook&callback_token=tok-x')
+        ->assertOk();
+
+    Queue::assertPushed(
+        ConsultarDocumentosProcessoMNIJob::class,
+        fn ($job) => $job->login_pje === 'env-login' && $job->senha_pje === 'env-senha'
+    );
+});
+
+it('documentos async sem callback continua retornando 422', function () {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
     $this->withHeaders(['X-API-Token' => 'tk-test'])
         ->getJson('/api/processo/consultar/documentos/async?tribunal_id=1&numero_processo=0600125-81.2024.8.03.0003')
         ->assertStatus(422)
-        ->assertJsonValidationErrors(['login_pje', 'senha_pje']);
+        ->assertJsonValidationErrors(['callback_url', 'callback_token'])
+        ->assertJsonMissingValidationErrors(['login_pje', 'senha_pje']);
 });
 
 it('documentos async despacha job com as credenciais do payload', function () {
@@ -227,4 +270,25 @@ it('show retorna 404 apos maxTentativas quando o documento nunca resolve link (s
         ->assertJsonPath('message', fn ($m) => str_contains($m, 'apos 3 tentativas') || str_contains($m, 'após 3 tentativas'));
 
     expect($chamadas)->toBe(3);
+});
+
+it('visualizar sem credenciais usa o par padrao do .env', function () {
+    fakeS3ComLinks();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+    $numero = 'VISENV' . getmypid();
+    $documento = criarDocumentoVisualizar($numero, 930010);
+    Storage::disk('s3')->put("documentos-processos/{$numero}/930010.pdf", 'pdf-fake');
+
+    // baixarDocumento é o ponto onde as credenciais chegam no download do MNI
+    $this->partialMock(\App\Services\Processo\SalvarDocumentoProcessoService::class, function ($mock) use ($documento) {
+        $mock->shouldReceive('baixarDocumento')
+            ->once()
+            ->withArgs(fn ($doc, $login, $senha) => $login === 'env-login' && $senha === 'env-senha')
+            ->andReturn($documento);
+    });
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson("/api/documento/visualizar?tribunal_id=999999&numero_processo={$numero}&id_documento=930010")
+        ->assertOk()
+        ->assertJsonPath('documento.link', "https://s3.fake/documentos-processos/{$numero}/930010.pdf");
 });

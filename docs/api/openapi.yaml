@@ -713,14 +713,21 @@ components:
     LoginPje:
       name: login_pje
       in: query
-      required: true
-      description: Login do usuário no PJe. Enviado na query string (ver aviso de segurança).
+      required: false
+      description: >-
+        Login do usuário no PJe. Opcional: quando omitido (ou quando só uma das
+        duas credenciais é enviada), o servidor usa o par padrão configurado em
+        PJE_LOGIN_PADRAO/PJE_SENHA_PADRAO; sem par padrão, valem as credenciais
+        cadastradas no tribunal. Enviado na query string (ver aviso de segurança).
       schema: { type: string }
     SenhaPje:
       name: senha_pje
       in: query
-      required: true
-      description: Senha do usuário no PJe. Enviada na query string (ver aviso de segurança).
+      required: false
+      description: >-
+        Senha do usuário no PJe. Opcional, seguindo a mesma cadeia de login_pje:
+        requisição → PJE_SENHA_PADRAO → credencial do tribunal. Enviada na query
+        string (ver aviso de segurança).
       schema: { type: string }
     TribunalIdQuery:
       name: tribunal_id
@@ -760,7 +767,7 @@ components:
           schema: { $ref: '#/components/schemas/ErroMensagem' }
           example: { message: "Token inválido ou não fornecido" }
     Erro422:
-      description: Falha de validação (ex. login_pje/senha_pje ausentes).
+      description: Falha de validação (ex. callback_url/callback_token ausentes nos endpoints assíncronos).
       content:
         application/json:
           schema:
@@ -773,8 +780,8 @@ components:
                   type: array
                   items: { type: string }
           example:
-            message: "The login pje field is required."
-            errors: { login_pje: ["The login pje field is required."] }
+            message: "The callback url field is required."
+            errors: { callback_url: ["The callback url field is required."] }
     Erro500:
       description: Erro interno / exceção MNI.
       content:
