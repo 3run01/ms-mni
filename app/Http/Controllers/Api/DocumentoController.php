@@ -27,8 +27,8 @@ class DocumentoController extends Controller
     public function show(Request $request): JsonResponse
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
         ]);
 
         try {
@@ -187,8 +187,8 @@ class DocumentoController extends Controller
     public function listarDocumentos(Request $request): JsonResponse
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
         ]);
 
         $numero_processo = cleanNumeroProcesso($request->numero_processo);
@@ -221,8 +221,8 @@ class DocumentoController extends Controller
     public function consultarDocumentosAsync(Request $request)
     {
         $request->validate([
-            'login_pje' => 'required|string',
-            'senha_pje' => 'required|string',
+            'login_pje' => 'nullable|string',
+            'senha_pje' => 'nullable|string',
             'callback_url' => ['required', 'string', 'max:2048', new \App\Rules\CallbackUrl],
             'callback_token' => ['required', 'string', 'max:500'],
         ]);
