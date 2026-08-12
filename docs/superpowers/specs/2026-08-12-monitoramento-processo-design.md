@@ -49,16 +49,23 @@ O que já existe e é reaproveitado sem alteração:
 - **Payload do webhook: resumo + deltas.** Contadores e a lista dos movimentos e
   documentos novos (metadados), auto-suficiente, sem exigir round-trip.
 - **Agendamento por polling de banco, não por `delay()` encadeado.** Coluna
-  `proxima_execucao_em` + comando `monitoramentos:despachar` a cada minuto.
-  Sobrevive a restart de worker, permite alterar intervalo sem cancelar job
-  pendente, e o estado é inspecionável em SQL.
-- **Fila dedicada `monitoramento`.** Não compete com `alta` (consultas
-  interativas) nem com `mni-download`.
+  `proxima_execucao_em` + comando `monitoramentos:despachar` **a cada 30
+  minutos**. Sobrevive a restart de worker, permite alterar intervalo sem
+  cancelar job pendente, e o estado é inspecionável em SQL. O tick de 30 min é a
+  **resolução** do agendamento: `intervalo_horas` é honrado com atraso de até
+  30 min (um monitoramento de 6h vencido às 14:07 roda às 14:30).
+- **Consumo serial: um processo por vez.** O comando só enfileira; a fila
+  `monitoramento` é consumida por **um único worker** (`maxProcesses: 1`), então
+  as consultas ao MNI acontecem uma a uma, nunca em paralelo. O espaçamento da
+  carga no tribunal vem daí — não de jitter no agendamento.
+- **Fila separada para o webhook (`monitoramento-webhook`).** Com workers
+  próprios: um cliente lento, ou em backoff de 1h, não pode segurar a fila
+  serial de consulta.
 - **Isolamento por token.** Toda leitura/escrita é filtrada por `api_token_id`
   do header `X-API-Token`. Um token não enxerga nem altera monitoramento de
   outro. É a primeira noção de tenancy do serviço.
-- **Intervalo em horas inteiras, 1 a 720** (1h a 30 dias), com jitter para
-  espalhar a carga no tribunal.
+- **Intervalo em horas inteiras, 1 a 720** (1h a 30 dias), honrado com a
+  resolução do tick de 30 min.
 - **Um monitoramento ativo por (token, tribunal, processo).** Recriar retorna
   `409` com o uuid do existente, em vez de duplicar consultas ao tribunal.
 
@@ -77,8 +84,10 @@ O que já existe e é reaproveitado sem alteração:
 
 **`MonitoramentoService`** — `app/Services/Monitoramento/MonitoramentoService.php`
 - Criar, atualizar, pausar, retomar e cancelar. Resolve a credencial, calcula a
-  primeira `proxima_execucao_em` (= agora, primeira execução imediata) e aplica
-  o limite de monitoramentos ativos por token.
+  primeira `proxima_execucao_em` (= agora → o registro entra no próximo tick do
+  despachador, ou seja, primeira execução em até 30 min) e aplica o limite de
+  monitoramentos ativos por token. Quem precisar do resultado na hora usa
+  `POST /monitoramentos/{uuid}/executar`, que enfileira direto sem esperar tick.
 
 **`CredencialPjeService`** — `app/Services/Monitoramento/CredencialPjeService.php`
 - `resolver(?string $login, ?string $senha, ApiToken $token, Tribunal $tribunal): ?CredencialPje`
@@ -94,16 +103,17 @@ O que já existe e é reaproveitado sem alteração:
   formato do payload. Processo inexistente antes → snapshot vazio → tudo é novo
   (primeira execução, sinalizada com `primeira_execucao: true`).
 
-**`ExecutarMonitoramentoProcessoJob`** — fila `monitoramento`
+**`ExecutarMonitoramentoProcessoJob`** — fila `monitoramento` (worker único)
 - `tries = 1` (o reagendamento é do agendador, não da fila; retry cego
   multiplicaria chamadas ao tribunal). Falha vira execução com `status: falha`.
 
-**`EnviarWebhookMonitoramentoJob`** — fila `monitoramento`
+**`EnviarWebhookMonitoramentoJob`** — fila `monitoramento-webhook`
 - `tries = 5`, `backoff = [10, 60, 300, 900, 3600]`, idempotente por
-  `webhook_enviado_em` — cópia fiel do `EnviarWebhookDownloadJob`.
+  `webhook_enviado_em` — cópia fiel do `EnviarWebhookDownloadJob`. Fila própria
+  para o backoff de cliente lento não bloquear a fila serial de consulta.
 
 **`MonitoramentosDespachar`** (`monitoramentos:despachar`) — comando agendado
-a cada minuto com `withoutOverlapping()`.
+a cada 30 minutos com `withoutOverlapping()`.
 
 **`MonitoramentosReenviarWebhook`** (`monitoramentos:reenviar-webhook`) —
 espelha `ExportacoesReenviarWebhook` para reenvio manual.
@@ -129,13 +139,15 @@ POST /api/processo/monitoramentos { numero_processo, tribunal_id, intervalo_hora
 ### Fluxo — ciclo agendado
 
 ```
-schedule:run (a cada minuto) → monitoramentos:despachar
+schedule:run → monitoramentos:despachar (a cada 30 min, withoutOverlapping)
   SELECT ... WHERE status='ativo' AND proxima_execucao_em <= now()
               AND (bloqueado_ate IS NULL OR bloqueado_ate < now())
   FOR UPDATE SKIP LOCKED  (chunks de 200)
-    → bloqueado_ate = now()+15min
-    → proxima_execucao_em = now() + intervalo_horas ± jitter
+    → bloqueado_ate = now()+2h            // trava contra re-despacho no próximo tick
+    → proxima_execucao_em = now() + intervalo_horas
     → ExecutarMonitoramentoProcessoJob::dispatch(id)->onQueue('monitoramento')
+
+fila 'monitoramento' (1 worker) → consome os jobs um a um, em série
 
 ExecutarMonitoramentoProcessoJob
   → cria execucao (iniciado_em)
@@ -146,13 +158,13 @@ ExecutarMonitoramentoProcessoJob
   → execucao: status=sucesso, contadores, delta
      monitoramento: ultima_execucao_em, data_referencia, falhas_consecutivas=0,
                     bloqueado_ate=null
-  → EnviarWebhookMonitoramentoJob::dispatch(execucao_id)
+  → EnviarWebhookMonitoramentoJob::dispatch(execucao_id)->onQueue('monitoramento-webhook')
 
   em exceção:
   → execucao: status=falha, erro_resumo
      monitoramento: falhas_consecutivas++, bloqueado_ate=null
                     se falhas_consecutivas >= 5 → status=suspenso
-  → EnviarWebhookMonitoramentoJob::dispatch(execucao_id)   // notifica mesmo assim
+  → EnviarWebhookMonitoramentoJob (idem)                   // notifica mesmo assim
 ```
 
 ### Mudança de dados
@@ -335,8 +347,18 @@ Cap de **500 itens por lista**; acima disso a lista é truncada e
 
 ## Regras de negócio
 
-- **Jitter:** `proxima_execucao_em = now() + intervalo_horas + rand(-5, +5) min`,
-  para não concentrar todas as consultas no mesmo minuto.
+- **Resolução de 30 min, execução serial.** O despacho reagenda
+  `proxima_execucao_em = now() + intervalo_horas` (sem jitter — a fila de worker
+  único já espaça as consultas naturalmente). `bloqueado_ate = now() + 2h` no
+  despacho impede que o tick seguinte re-enfileire um monitoramento cujo job
+  ainda está aguardando na fila; o job zera `bloqueado_ate` ao terminar
+  (sucesso ou falha). Se um job for perdido (deploy, crash), o lock expira
+  sozinho em 2h e o tick seguinte recupera.
+- **Vazão é o limite real:** com 1 worker, se o lote de um tick for maior do
+  que o worker consome até o próximo tick, a fila atrasa — o monitoramento
+  executa, só que mais tarde. `monitoramentos:despachar` loga o tamanho do lote
+  e o comando `horizon:status`/Pulse mostram o backlog; o teto
+  `max_ativos_por_token` existe para segurar esse volume.
 - **`data_referencia`:** a partir da 2ª execução usa a data da última execução
   bem-sucedida **menos 1 dia** (o MNI trunca `dataReferencia` para o dia:
   `ConsultarProcessoService.php:24`). Primeira execução usa o default atual de
@@ -368,10 +390,13 @@ Cap de **500 itens por lista**; acima disso a lista é truncada e
 
 ## Infra
 
-- **Horizon:** novo supervisor `supervisor-monitoramento` na fila
-  `monitoramento` (`maxProcesses` modesto, ex. 3 — o gargalo é o tribunal).
+- **Horizon:** dois supervisores novos:
+  - `supervisor-monitoramento` → fila `monitoramento`, **`maxProcesses: 1` fixo
+    (balance `false`)** — é o que garante a consulta 1 a 1 no tribunal;
+  - `supervisor-monitoramento-webhook` → fila `monitoramento-webhook`,
+    `maxProcesses: 2`.
 - **Schedule** (`routes/console.php`):
-  - `monitoramentos:despachar` → `everyMinute()->withoutOverlapping()`
+  - `monitoramentos:despachar` → `everyThirtyMinutes()->withoutOverlapping()`
   - `monitoramentos:limpar-execucoes` → `dailyAt('04:30')`
 - **Config** `config/pje.php`: bloco `monitoramento` com
   `max_ativos_por_token`, `intervalo_min_horas`, `intervalo_max_horas`,
@@ -387,8 +412,9 @@ Cap de **500 itens por lista**; acima disso a lista é truncada e
 - `tests/Unit/Models/CredencialPjeTest.php` — `assertDatabaseMissing` com a senha
   em texto puro (prova a cifra); `login_hash` estável; `login_mascarado`.
 - `tests/Feature/Console/MonitoramentosDespacharTest.php` — despacha só os
-  vencidos e ativos; reagenda com jitter; `bloqueado_ate` impede duplo despacho;
-  ignora `pausado`/`suspenso`/`cancelado`.
+  vencidos e ativos; reagenda `proxima_execucao_em = now() + intervalo_horas`;
+  `bloqueado_ate` impede duplo despacho no tick seguinte e expira após 2h;
+  ignora `pausado`/`suspenso`/`cancelado`; jobs vão para a fila `monitoramento`.
 - `tests/Feature/Jobs/ExecutarMonitoramentoProcessoJobTest.php` — delta correto
   com `ProcessoService` mockado; `Queue::fake()` provando que
   `BaixarDocumentoMNIJob` **não** é despachado; exceção → `falhas_consecutivas`
@@ -413,8 +439,9 @@ exportação.
 ## Riscos e trade-offs
 
 1. **Carga no tribunal.** N monitoramentos × frequência vira volume de SOAP.
-   Mitigado por intervalo mínimo de 1h, jitter, fila dedicada com concorrência
-   baixa e limite de ativos por token. É o risco principal a acompanhar.
+   Mitigado por intervalo mínimo de 1h, consumo serial (1 worker consultando
+   1 processo por vez) e limite de ativos por token. É o risco principal a
+   acompanhar.
 2. **`data_referencia` com granularidade de dia** torna intervalos curtos
    (1–6h) menos eficientes no lado do tribunal, ainda que corretos no delta.
 3. **Primeira execução notifica tudo** (até 500 itens) — sinalizado por
