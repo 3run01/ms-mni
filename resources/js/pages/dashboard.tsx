@@ -1,5 +1,5 @@
-import { Deferred, Head, router } from '@inertiajs/react';
-import { AlertCircle, Clock, FileDown, FolderDown } from 'lucide-react';
+import { Deferred, Head, Link, router } from '@inertiajs/react';
+import { AlertCircle, Clock, FileDown, FolderDown, Radar } from 'lucide-react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ type Metricas = {
         documentosBaixados: number;
         documentosPendentes: number;
         documentosErro: number;
+        monitoramentosAtivos: number;
     };
     processosPorDia: PontoSerie[];
     documentosPorDia: PontoSerie[];
@@ -51,13 +52,16 @@ function CardTotal({
     titulo,
     valor,
     icone: Icone,
+    href,
 }: {
     titulo: string;
     valor?: number;
     icone: typeof FileDown;
+    // quando informado, o card inteiro vira link para a listagem correspondente
+    href?: string;
 }) {
-    return (
-        <Card>
+    const conteudo = (
+        <Card className={href ? 'transition-colors hover:border-primary/50 hover:bg-accent/40' : undefined}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">{titulo}</CardTitle>
                 <Icone className="size-4 text-muted-foreground" />
@@ -70,6 +74,14 @@ function CardTotal({
                 )}
             </CardContent>
         </Card>
+    );
+
+    return href ? (
+        <Link href={href} prefetch className="block">
+            {conteudo}
+        </Link>
+    ) : (
+        conteudo
     );
 }
 
@@ -164,11 +176,17 @@ export default function Dashboard({ periodo, metricas }: { periodo: number; metr
                     </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                     <CardTotal titulo="Processos no período" valor={metricas?.totais.processos} icone={FolderDown} />
                     <CardTotal titulo="Documentos baixados no período" valor={metricas?.totais.documentosBaixados} icone={FileDown} />
                     <CardTotal titulo="Documentos pendentes" valor={metricas?.totais.documentosPendentes} icone={Clock} />
                     <CardTotal titulo="Documentos com erro" valor={metricas?.totais.documentosErro} icone={AlertCircle} />
+                    <CardTotal
+                        titulo="Processos monitorados"
+                        valor={metricas?.totais.monitoramentosAtivos}
+                        icone={Radar}
+                        href="/monitoramentos"
+                    />
                 </div>
 
                 <div className="grid gap-4 lg:grid-cols-2">

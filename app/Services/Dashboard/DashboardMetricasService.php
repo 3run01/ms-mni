@@ -4,6 +4,7 @@ namespace App\Services\Dashboard;
 
 use App\Models\Processo;
 use App\Models\ProcessoDocumento;
+use App\Models\ProcessoMonitoramento;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -26,6 +27,9 @@ class DashboardMetricasService
                     ->count(),
                 'documentosPendentes' => ProcessoDocumento::where('status', ProcessoDocumento::STATUS_PENDENTE)->count(),
                 'documentosErro' => ProcessoDocumento::where('status', ProcessoDocumento::STATUS_ERRO)->count(),
+                // estado atual, não recorte do período: quantos processos estão
+                // sendo consultados periodicamente agora.
+                'monitoramentosAtivos' => ProcessoMonitoramento::where('status', ProcessoMonitoramento::STATUS_ATIVO)->count(),
             ],
             'processosPorDia' => $this->seriePorDia(
                 Processo::query(),
