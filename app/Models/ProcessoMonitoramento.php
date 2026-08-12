@@ -68,10 +68,21 @@ class ProcessoMonitoramento extends Model
         return $this->belongsTo(CredencialPje::class, 'credencial_id');
     }
 
+    public function apiToken()
+    {
+        return $this->belongsTo(ApiToken::class, 'api_token_id');
+    }
+
     public function execucoes()
     {
         return $this->hasMany(ProcessoMonitoramentoExecucao::class, 'monitoramento_id')
             ->orderBy('id', 'desc');
+    }
+
+    /** Subquery por parent: seguro para eager loading, diferente de hasMany()->limit(1). */
+    public function ultimaExecucao()
+    {
+        return $this->hasOne(ProcessoMonitoramentoExecucao::class, 'monitoramento_id')->latestOfMany();
     }
 
     public function scopeDoToken(Builder $query, int $apiTokenId): Builder

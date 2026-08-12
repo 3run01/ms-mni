@@ -80,6 +80,41 @@ export interface TribunalOption {
     nome: string;
 }
 
+export interface TokenOption {
+    id: number;
+    name: string;
+}
+
+export interface MonitoramentoUltimaExecucao {
+    status: string;
+    houve_alteracao: boolean;
+    movimentos_novos: number;
+    documentos_novos: number;
+    erro_resumo: string | null;
+}
+
+export interface MonitoramentoListItem {
+    uuid: string;
+    numero_processo: string;
+    // null quando o processo ainda não foi baixado (nenhuma execução concluída)
+    processo_id: number | null;
+    tribunal: string | null;
+    token: string | null;
+    status: string;
+    intervalo_horas: number;
+    proxima_execucao_em: string | null;
+    ultima_execucao_em: string | null;
+    falhas_consecutivas: number;
+    ultima_execucao: MonitoramentoUltimaExecucao | null;
+}
+
+export interface MonitoramentoFiltros {
+    busca?: string;
+    tribunal_id?: number | string;
+    status?: string;
+    api_token_id?: number | string;
+}
+
 export interface ClasseOption {
     codigo: string;
     descricao: string;

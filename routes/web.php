@@ -3,6 +3,7 @@
 use App\Http\Controllers\ApiTokenController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\MonitoramentoController;
 use App\Http\Controllers\ProcessoController;
 use App\Http\Controllers\TribunalController;
 use Illuminate\Support\Facades\Route;
@@ -46,6 +47,8 @@ Route::middleware('auth:web')->group(function () {
     Route::post('/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');
     Route::patch('/tokens/{apiToken}/ativo', [ApiTokenController::class, 'toggleAtivo'])->name('tokens.toggle');
     Route::delete('/tokens/{apiToken}', [ApiTokenController::class, 'destroy'])->name('tokens.destroy');
+
+    Route::get('/monitoramentos', [MonitoramentoController::class, 'index'])->name('monitoramentos.index');
 
     Route::get('/processos', [ProcessoController::class, 'index'])->name('processos.index');
     Route::get('/processos/{processo}', [ProcessoController::class, 'show'])->name('processos.show');
