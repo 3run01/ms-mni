@@ -250,6 +250,39 @@ return [
             'timeout' => 600,
             'nice' => 0,
         ],
+
+        // Fila serial: os monitoramentos consultam o tribunal 1 por 1.
+        // maxProcesses fica em 1 em todos os ambientes — de propósito.
+        'supervisor-monitoramento' => [
+            'connection' => 'redis',
+            'queue' => ['monitoramento'],
+            'balance' => false,
+            'minProcesses' => 1,
+            'maxProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 0,
+            'memory' => 512,
+            'tries' => 1,
+            'timeout' => 660,
+            'nice' => 0,
+        ],
+
+        'supervisor-monitoramento-webhook' => [
+            'connection' => 'redis',
+            'queue' => ['monitoramento-webhook'],
+            'balance' => 'simple',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => 1,
+            'maxProcesses' => 2,
+            'balanceMaxShift' => 1,
+            'balanceCooldown' => 3,
+            'maxTime' => 3600,
+            'maxJobs' => 0,
+            'memory' => 512,
+            'tries' => 3,
+            'timeout' => 60,
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
@@ -263,6 +296,12 @@ return [
             'supervisor-exportar' => [
                 'maxProcesses' => 1,
             ],
+            'supervisor-monitoramento' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-monitoramento-webhook' => [
+                'maxProcesses' => 2,
+            ],
         ],
 
         'local' => [
@@ -274,6 +313,12 @@ return [
             ],
             'supervisor-exportar' => [
                 'maxProcesses' => 2,
+            ],
+            'supervisor-monitoramento' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-monitoramento-webhook' => [
+                'maxProcesses' => 1,
             ],
         ],
     ],
