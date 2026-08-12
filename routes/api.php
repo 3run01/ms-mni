@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\ConsultarProcessoController;
 use App\Http\Controllers\Api\DocumentoController;
 use App\Http\Controllers\Api\DownloadProcessoController;
+use App\Http\Controllers\Api\MonitoramentoProcessoController;
 use App\Http\Controllers\Api\TribunalController;
 use App\Http\Middleware\InjectCredenciaisPjePadrao;
 use App\Http\Middleware\ValidateApiToken;
@@ -31,5 +32,21 @@ Route::middleware([ValidateApiToken::class, InjectCredenciaisPjePadrao::class])-
         Route::get('/dados-basicos/async', [ConsultarProcessoController::class, 'consultarDadosBasicosAsync']);
         Route::get('/movimentos/async', [ConsultarProcessoController::class, 'consultarMovimentosAsync']);
         Route::get('/documentos/async', [DocumentoController::class, 'consultarDocumentosAsync']);
+    });
+});
+
+// Monitoramento fica fora do grupo acima de propósito: sem
+// InjectCredenciaisPjePadrao, senão o par padrão do .env seria persistido como
+// cópia cifrada congelada e a rotação do .env não propagaria. Sem credencial no
+// payload, o job lê o config fresco a cada execução.
+Route::middleware([ValidateApiToken::class])->group(function () {
+    Route::group(['prefix' => '/processo/monitoramentos'], function () {
+        Route::post('/', [MonitoramentoProcessoController::class, 'store']);
+        Route::get('/', [MonitoramentoProcessoController::class, 'index']);
+        Route::get('/{uuid}', [MonitoramentoProcessoController::class, 'show']);
+        Route::patch('/{uuid}', [MonitoramentoProcessoController::class, 'update']);
+        Route::delete('/{uuid}', [MonitoramentoProcessoController::class, 'destroy']);
+        Route::get('/{uuid}/execucoes', [MonitoramentoProcessoController::class, 'execucoes']);
+        Route::post('/{uuid}/executar', [MonitoramentoProcessoController::class, 'executar']);
     });
 });
