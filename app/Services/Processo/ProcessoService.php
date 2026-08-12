@@ -28,7 +28,8 @@ class ProcessoService
         $numero_processo,
         $login = null,
         $senha = null,
-        $data_referencia = null
+        $data_referencia = null,
+        bool $baixar_binarios = true
     ) {
         // Se data_referencia não foi fornecida, usar padrão de 90 dias atrás
         if ($data_referencia === null) {
@@ -58,7 +59,7 @@ class ProcessoService
         $salvarMovimentoProcessoService->execute($processo, $retorno->movimento);
 
         $salvarDocumentoProcessoService = new SalvarDocumentoProcessoService();
-        $salvarDocumentoProcessoService->execute($processo, $retorno->documento, $login, $senha);
+        $salvarDocumentoProcessoService->execute($processo, $retorno->documento, $login, $senha, $baixar_binarios);
 
         return $processo;
     }
