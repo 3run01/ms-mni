@@ -22,7 +22,7 @@ class ProcessoMonitoramentoFactory extends Factory
             'numero_processo' => fake()->unique()->numerify('####################'),
             'intervalo_horas' => 6,
             'credencial_id' => null,
-            'callback_url' => 'https://cliente.exemplo.gov.br/webhook',
+            'callback_url' => 'https://example.com/webhook',
             'callback_token' => 'tok-' . fake()->sha1(),
             'status' => ProcessoMonitoramento::STATUS_ATIVO,
             'proxima_execucao_em' => now()->addHours(6),
