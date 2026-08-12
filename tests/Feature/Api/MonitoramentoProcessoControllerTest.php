@@ -53,6 +53,7 @@ it('cria monitoramento com credencial cifrada e não devolve segredo', function 
         ->and($dados['status'])->toBe('ativo')
         ->and($dados['numero_processo'])->toBe('00008323520244013200')
         ->and($dados['intervalo_horas'])->toBe(6)
+        ->and($dados['falhas_consecutivas'])->toBe(0)
         ->and($dados['credencial']['login_mascarado'])->toBe('123*****900')
         ->and($dados)->not->toHaveKeys(['callback_token', 'id', 'api_token_id'])
         ->and($dados['credencial'])->not->toHaveKeys(['login', 'senha', 'login_hash']);
@@ -72,7 +73,7 @@ it('cria sem credencial quando o payload não traz o par', function () {
         ->assertStatus(201);
 
     expect($response->json('data.credencial'))->toBeNull()
-        ->and(CredencialPje::count())->toBe(0);
+        ->and(CredencialPje::where('api_token_id', $this->token->id)->count())->toBe(0);
 });
 
 it('rejeita intervalo fora da faixa e campos ausentes', function () {

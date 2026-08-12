@@ -73,6 +73,7 @@ class MonitoramentoProcessoController extends Controller
             'callback_url' => $request->callback_url,
             'callback_token' => $request->callback_token,
             'status' => ProcessoMonitoramento::STATUS_ATIVO,
+            'falhas_consecutivas' => 0,
             // entra no próximo tick do despachador (a cada 30 min)
             'proxima_execucao_em' => now(),
         ]);

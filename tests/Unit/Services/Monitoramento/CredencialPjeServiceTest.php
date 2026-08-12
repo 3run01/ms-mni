@@ -12,13 +12,17 @@ beforeEach(function () {
     $this->service = new CredencialPjeService();
     $this->token = ApiToken::factory()->create();
     $this->tribunal = Tribunal::factory()->create();
+
+    // contagens sempre escopadas ao tribunal do teste: o banco de dev pode
+    // ter credenciais de outras origens.
+    $this->credenciaisDoTeste = fn () => CredencialPje::where('tribunal_id', $this->tribunal->id)->count();
 });
 
 it('retorna null sem par completo (regra atômica)', function () {
     expect($this->service->resolver($this->token, $this->tribunal, null, null))->toBeNull()
         ->and($this->service->resolver($this->token, $this->tribunal, 'so-login', null))->toBeNull()
         ->and($this->service->resolver($this->token, $this->tribunal, null, 'so-senha'))->toBeNull()
-        ->and(CredencialPje::count())->toBe(0);
+        ->and(($this->credenciaisDoTeste)())->toBe(0);
 });
 
 it('cria credencial cifrada com login_hash', function () {
@@ -38,7 +42,7 @@ it('reusa credencial existente do mesmo (token, tribunal, login)', function () {
     $segunda = $this->service->resolver($this->token, $this->tribunal, '12345678900', 'segredo-pje');
 
     expect($segunda->id)->toBe($primeira->id)
-        ->and(CredencialPje::count())->toBe(1);
+        ->and(($this->credenciaisDoTeste)())->toBe(1);
 });
 
 it('atualiza a senha quando muda para o mesmo login', function () {
@@ -47,7 +51,7 @@ it('atualiza a senha quando muda para o mesmo login', function () {
 
     expect($segunda->id)->toBe($primeira->id)
         ->and($segunda->fresh()->senha)->toBe('senha-nova')
-        ->and(CredencialPje::count())->toBe(1);
+        ->and(($this->credenciaisDoTeste)())->toBe(1);
 });
 
 it('não reusa credencial de outro token', function () {
@@ -57,5 +61,5 @@ it('não reusa credencial de outro token', function () {
     $dele = $this->service->resolver($outroToken, $this->tribunal, '12345678900', 'segredo');
 
     expect($dele->id)->not->toBe($minha->id)
-        ->and(CredencialPje::count())->toBe(2);
+        ->and(($this->credenciaisDoTeste)())->toBe(2);
 });
