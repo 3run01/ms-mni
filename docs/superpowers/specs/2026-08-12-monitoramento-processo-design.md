@@ -248,7 +248,11 @@ rodar `mni:baixar-documento-pendente`. É o que "metadados" significa.
 
 ## Contrato HTTP
 
-Todas as rotas sob `ValidateApiToken` (+ `InjectCredenciaisPjePadrao` no `store`).
+Todas as rotas sob `ValidateApiToken` — **sem** `InjectCredenciaisPjePadrao`:
+se o middleware injetasse o par padrão do `.env` no `store`, ele seria
+persistido como cópia cifrada congelada em `credenciais_pje`, e a rotação do
+`.env` não propagaria. Payload sem credencial → `credencial_id = null` → o job
+lê `config('pje.credenciais_padrao')` fresco a cada execução.
 Prefixo: `/api/processo/monitoramentos`.
 
 ### `POST /api/processo/monitoramentos`
