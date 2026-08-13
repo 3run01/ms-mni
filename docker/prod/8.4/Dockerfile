@@ -94,7 +94,6 @@ RUN install-php-extensions \
     bcmath \
     bz2 \
     exif \
-    excimer \
     gd \
     igbinary \
     intl \
@@ -112,7 +111,14 @@ RUN install-php-extensions \
     uv \
     vips \
     xdebug \
-    zip && \
+    zip
+
+# excimer é opcional (profiling do Sentry) e o PECL já publicou versão sem REST
+# xml, quebrando o build inteiro. Tenta a última, cai para a 1.2.5 e segue sem
+# profiling se as duas falharem.
+RUN (install-php-extensions excimer \
+        || install-php-extensions excimer-1.2.5 \
+        || echo 'AVISO: excimer indisponivel no PECL; imagem sem profiling do Sentry') && \
     docker-php-source delete && \
     rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
 
