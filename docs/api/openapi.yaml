@@ -29,6 +29,19 @@ tags:
     description: Consulta e download de documentos
   - name: Tribunais
     description: Listagem de tribunais
+  - name: Monitoramentos
+    description: |
+      Monitoramento periódico de processos. O cliente assina um processo com um
+      intervalo em horas; um comando agendado (a cada 30 min) enfileira os
+      vencidos numa fila serial, que consulta o MNI **um por vez**, atualiza o
+      processo e dispara o webhook `monitoramento` em **toda** execução.
+
+      Diferente dos demais endpoints, as credenciais PJe vão no **body** (não em
+      query string) e são armazenadas cifradas em tabela própria. A API nunca as
+      devolve — apenas `login_mascarado`.
+
+      Cada ciclo grava **metadados** de documentos novos, sem baixar os binários:
+      o conteúdo continua sob demanda via `/documento/visualizar`.
 paths:
   /tribunais:
     get:
@@ -332,7 +345,254 @@ paths:
               schema: { $ref: '#/components/schemas/Erro' }
               example: { error: "Nenhum documento encontrado para o processo informado com os filtros aplicados." }
         '422': { $ref: '#/components/responses/Erro422' }
+  /processo/monitoramentos:
+    post:
+      tags: [Monitoramentos]
+      summary: Criar monitoramento de processo
+      description: |
+        Assina o monitoramento periódico de um processo. A primeira execução
+        entra no próximo tick do agendador (até 30 min).
+
+        `login_pje`/`senha_pje` são opcionais e formam um **par atômico** (um sem
+        o outro → 422). Quando informados, são cifrados em `credenciais_pje`;
+        quando ausentes, cada execução usa o par padrão do ambiente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MonitoramentoCriar' }
+      responses:
+        '201':
+          description: Monitoramento criado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Monitoramento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '409':
+          description: Já existe monitoramento vivo para (token, tribunal, processo).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  uuid: { type: string, format: uuid, description: "uuid do monitoramento existente." }
+              example:
+                error: "Já existe monitoramento para este processo"
+                uuid: "9f1c2b3a-4d5e-6f70-8192-a3b4c5d6e7f8"
+        '422': { $ref: '#/components/responses/Erro422' }
+    get:
+      tags: [Monitoramentos]
+      summary: Listar monitoramentos do token
+      description: Retorna apenas os monitoramentos criados pelo token autenticado, 10 por página.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filtro opcional por status.
+          schema: { type: string, enum: [ativo, pausado, suspenso, cancelado] }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Página de monitoramentos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Monitoramento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+  /processo/monitoramentos/{uuid}:
+    get:
+      tags: [Monitoramentos]
+      summary: Detalhar monitoramento
+      description: Inclui as 10 execuções mais recentes. uuid de outro token responde 404.
+      parameters:
+        - { $ref: '#/components/parameters/MonitoramentoUuid' }
+      responses:
+        '200':
+          description: Monitoramento encontrado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Monitoramento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404': { $ref: '#/components/responses/Erro404Monitoramento' }
+    patch:
+      tags: [Monitoramentos]
+      summary: Atualizar intervalo, callback ou status
+      description: |
+        Todos os campos são opcionais. `status` aceita apenas `ativo` e
+        `pausado` — cancelar é o `DELETE`. Retomar (`ativo`) zera
+        `falhas_consecutivas` e reagenda para o próximo tick.
+      parameters:
+        - { $ref: '#/components/parameters/MonitoramentoUuid' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                intervalo_horas: { type: integer, minimum: 1, maximum: 720 }
+                callback_url: { type: string, format: uri }
+                callback_token: { type: string, maxLength: 500 }
+                status: { type: string, enum: [ativo, pausado] }
+      responses:
+        '200':
+          description: Monitoramento atualizado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Monitoramento' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404': { $ref: '#/components/responses/Erro404Monitoramento' }
+        '422': { $ref: '#/components/responses/Erro422' }
+    delete:
+      tags: [Monitoramentos]
+      summary: Cancelar monitoramento
+      description: Marca como `cancelado` e faz soft delete, preservando o histórico de execuções. Libera o processo para uma nova assinatura.
+      parameters:
+        - { $ref: '#/components/parameters/MonitoramentoUuid' }
+      responses:
+        '204': { description: Cancelado. Corpo vazio. }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404': { $ref: '#/components/responses/Erro404Monitoramento' }
+  /processo/monitoramentos/{uuid}/execucoes:
+    get:
+      tags: [Monitoramentos]
+      summary: Histórico de execuções
+      parameters:
+        - { $ref: '#/components/parameters/MonitoramentoUuid' }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Página de execuções, mais recentes primeiro.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/MonitoramentoExecucao' }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404': { $ref: '#/components/responses/Erro404Monitoramento' }
+  /processo/monitoramentos/{uuid}/executar:
+    post:
+      tags: [Monitoramentos]
+      summary: Executar agora (fora do agendamento)
+      description: Enfileira uma execução imediata na fila `monitoramento` sem alterar `proxima_execucao_em`. Útil para testar o webhook.
+      parameters:
+        - { $ref: '#/components/parameters/MonitoramentoUuid' }
+      responses:
+        '202':
+          description: Execução enfileirada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Execução enfileirada" }
+                  uuid: { type: string, format: uuid }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '404': { $ref: '#/components/responses/Erro404Monitoramento' }
 webhooks:
+  monitoramento:
+    post:
+      summary: Notificação de execução de monitoramento
+      description: |
+        Disparado em **toda** execução agendada — com ou sem novidade no
+        processo. O ms-mni faz `POST {callback_url}` com os headers:
+
+        | header | conteúdo |
+        |---|---|
+        | `X-API-Token` | o `callback_token` informado na criação |
+        | `X-Evento` | `processo.monitoramento.executado` |
+        | `X-Idempotency-Key` | `execucao_id` — use para deduplicar reenvios |
+
+        Retentativas: 5 tentativas com backoff `10s, 1min, 5min, 15min, 1h`.
+        Resposta 4xx é tratada como rejeição permanente (não retenta); 5xx
+        retenta. Listas de itens são limitadas a 500 elementos —
+        `resumo.truncado = true` sinaliza o corte.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookMonitoramentoPayload' }
+            examples:
+              com_alteracao:
+                summary: Execução com movimento e documento novos
+                value:
+                  evento: processo.monitoramento.executado
+                  monitoramento_id: "9f1c2b3a-4d5e-6f70-8192-a3b4c5d6e7f8"
+                  execucao_id: "c2e0d1f2-3a4b-5c6d-7e8f-9a0b1c2d3e4f"
+                  numero_processo: "00008323520244013200"
+                  tribunal_id: 12
+                  executado_em: "2026-08-12T18:03:04-03:00"
+                  status: sucesso
+                  primeira_execucao: false
+                  houve_alteracao: true
+                  resumo: { movimentos_novos: 2, documentos_novos: 1, truncado: false }
+                  movimentos:
+                    - identificador_movimento: "MOV-2026-0001"
+                      codigo_nacional: 123
+                      complemento: "Conclusos para despacho"
+                      data_hora: "2026-08-12T09:12:00-03:00"
+                  documentos:
+                    - id_documento: 900001
+                      descricao: "Petição inicial"
+                      tipo_documento: "57"
+                      mimetype: "application/pdf"
+                      data_hora: "2026-08-12T09:12:00-03:00"
+                      nivel_sigilo: 0
+                  proxima_execucao_em: "2026-08-13T00:03:00-03:00"
+              sem_alteracao:
+                summary: Execução sem novidade
+                value:
+                  evento: processo.monitoramento.executado
+                  monitoramento_id: "9f1c2b3a-4d5e-6f70-8192-a3b4c5d6e7f8"
+                  execucao_id: "d3f1e2a3-4b5c-6d7e-8f90-a1b2c3d4e5f6"
+                  numero_processo: "00008323520244013200"
+                  tribunal_id: 12
+                  executado_em: "2026-08-13T00:03:02-03:00"
+                  status: sucesso
+                  primeira_execucao: false
+                  houve_alteracao: false
+                  resumo: { movimentos_novos: 0, documentos_novos: 0, truncado: false }
+                  movimentos: []
+                  documentos: []
+                  proxima_execucao_em: "2026-08-13T06:03:00-03:00"
+              falha:
+                summary: Execução que falhou (e suspendeu o monitoramento)
+                value:
+                  evento: processo.monitoramento.executado
+                  monitoramento_id: "9f1c2b3a-4d5e-6f70-8192-a3b4c5d6e7f8"
+                  execucao_id: "e4a2b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b"
+                  numero_processo: "00008323520244013200"
+                  tribunal_id: 12
+                  executado_em: "2026-08-13T06:03:01-03:00"
+                  status: falha
+                  houve_alteracao: false
+                  erro_resumo: "MNI: credenciais inválidas"
+                  falhas_consecutivas: 5
+                  monitoramento_status: suspenso
+      responses:
+        '200': { description: Webhook recebido pelo chamador. }
   download:
     post:
       summary: Notificação de conclusão da exportação
@@ -430,6 +690,133 @@ components:
           type: string
           example: "Token inválido ou não fornecido"
       required: [message]
+    MonitoramentoCriar:
+      type: object
+      required: [numero_processo, tribunal_id, intervalo_horas, callback_url, callback_token]
+      properties:
+        numero_processo:
+          type: string
+          maxLength: 25
+          description: "Aceita com ou sem máscara; é normalizado para só dígitos."
+          example: "0000832-35.2024.4.01.3200"
+        tribunal_id:
+          type: integer
+          description: "Tribunal ativo."
+        intervalo_horas:
+          type: integer
+          minimum: 1
+          maximum: 720
+          description: "Periodicidade da consulta, de 1 hora a 30 dias."
+          example: 6
+        callback_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: "URL https que recebe o webhook a cada execução. Bloqueia IPs internos."
+        callback_token:
+          type: string
+          maxLength: 500
+          description: "Reenviado no header X-API-Token do webhook, para o chamador validar a origem."
+        login_pje:
+          type: string
+          maxLength: 255
+          description: "Opcional. Par atômico com senha_pje. Armazenado cifrado; nunca é devolvido."
+        senha_pje:
+          type: string
+          maxLength: 255
+          description: "Opcional. Par atômico com login_pje."
+    Monitoramento:
+      type: object
+      properties:
+        uuid: { type: string, format: uuid }
+        numero_processo: { type: string, example: "00008323520244013200" }
+        tribunal_id: { type: integer }
+        intervalo_horas: { type: integer, example: 6 }
+        status: { type: string, enum: [ativo, pausado, suspenso, cancelado] }
+        callback_url: { type: string, format: uri }
+        proxima_execucao_em: { type: [string, 'null'], format: date-time }
+        ultima_execucao_em: { type: [string, 'null'], format: date-time }
+        falhas_consecutivas:
+          type: integer
+          description: "Zerado a cada sucesso. Ao atingir 5, o monitoramento vira `suspenso`."
+        credencial:
+          type: [object, 'null']
+          description: "null quando o monitoramento usa o par padrão do ambiente."
+          properties:
+            uuid: { type: string, format: uuid }
+            login_mascarado: { type: string, example: "123*****900" }
+        created_at: { type: [string, 'null'], format: date-time }
+        execucoes:
+          type: array
+          description: "Presente apenas no detalhe (GET por uuid): as 10 execuções mais recentes."
+          items: { $ref: '#/components/schemas/MonitoramentoExecucao' }
+    MonitoramentoExecucao:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: "Mesmo valor do header X-Idempotency-Key do webhook."
+        status: { type: string, enum: [sucesso, falha] }
+        houve_alteracao: { type: boolean }
+        movimentos_novos: { type: integer }
+        documentos_novos: { type: integer }
+        erro_resumo: { type: [string, 'null'] }
+        iniciado_em: { type: [string, 'null'], format: date-time }
+        finalizado_em: { type: [string, 'null'], format: date-time }
+        webhook_enviado_em: { type: [string, 'null'], format: date-time }
+        webhook_status_http: { type: [integer, 'null'] }
+    WebhookMonitoramentoPayload:
+      type: object
+      required: [evento, monitoramento_id, execucao_id, numero_processo, status, houve_alteracao]
+      properties:
+        evento: { type: string, enum: [processo.monitoramento.executado] }
+        monitoramento_id: { type: string, format: uuid }
+        execucao_id: { type: string, format: uuid }
+        numero_processo: { type: string }
+        tribunal_id: { type: integer }
+        executado_em: { type: [string, 'null'], format: date-time }
+        status: { type: string, enum: [sucesso, falha] }
+        houve_alteracao: { type: boolean }
+        primeira_execucao:
+          type: boolean
+          description: "Presente quando status=sucesso. true = carga inicial (o processo não existia na base)."
+        resumo:
+          type: object
+          description: "Presente quando status=sucesso."
+          properties:
+            movimentos_novos: { type: integer }
+            documentos_novos: { type: integer }
+            truncado: { type: boolean, description: "true quando alguma lista passou de 500 itens." }
+        movimentos:
+          type: array
+          description: "Presente quando status=sucesso. Apenas os movimentos novos."
+          items:
+            type: object
+            properties:
+              identificador_movimento: { type: string }
+              codigo_nacional: { type: [integer, 'null'] }
+              complemento: { type: [string, 'null'] }
+              data_hora: { type: [string, 'null'], format: date-time }
+        documentos:
+          type: array
+          description: "Presente quando status=sucesso. Apenas metadados — o binário não é baixado pelo monitoramento."
+          items:
+            type: object
+            properties:
+              id_documento: { type: integer }
+              descricao: { type: [string, 'null'] }
+              tipo_documento: { type: [string, 'null'] }
+              mimetype: { type: [string, 'null'] }
+              data_hora: { type: [string, 'null'], format: date-time }
+              nivel_sigilo: { type: [integer, 'null'] }
+        proxima_execucao_em: { type: [string, 'null'], format: date-time }
+        erro_resumo: { type: string, description: "Presente quando status=falha." }
+        falhas_consecutivas: { type: integer, description: "Presente quando status=falha." }
+        monitoramento_status:
+          type: string
+          enum: [ativo, pausado, suspenso, cancelado]
+          description: "Presente quando status=falha. `suspenso` = parou de agendar; retome via PATCH."
     Tribunal:
       type: object
       properties:
@@ -753,6 +1140,12 @@ components:
       required: true
       description: Identificador do documento no processo.
       schema: { type: string }
+    MonitoramentoUuid:
+      name: uuid
+      in: path
+      required: true
+      description: uuid público do monitoramento.
+      schema: { type: string, format: uuid }
   responses:
     Erro400:
       description: Requisição inválida (parâmetro obrigatório ausente).
@@ -782,6 +1175,13 @@ components:
           example:
             message: "The callback url field is required."
             errors: { callback_url: ["The callback url field is required."] }
+    Erro404Monitoramento:
+      description: |
+        Monitoramento não encontrado. Também é a resposta para um uuid que
+        pertence a outro token — a API não confirma a existência do recurso.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErroMensagem' }
     Erro500:
       description: Erro interno / exceção MNI.
       content:

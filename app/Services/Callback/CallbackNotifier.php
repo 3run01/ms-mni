@@ -6,16 +6,20 @@ use Illuminate\Support\Facades\Http;
 
 class CallbackNotifier
 {
-    public function notificar(string $url, string $token, array $payload): void
+    /**
+     * @param  array<string, string>  $headers  Headers extras (o X-API-Token sempre prevalece).
+     * @return int Status HTTP da resposta bem-sucedida.
+     */
+    public function notificar(string $url, string $token, array $payload, array $headers = []): int
     {
         app(CallbackUrlValidator::class)->assertValida($url);
 
-        $response = Http::withHeaders(['X-API-Token' => $token])
+        $response = Http::withHeaders(array_merge($headers, ['X-API-Token' => $token]))
             ->timeout(10)
             ->post($url, $payload);
 
         if ($response->successful()) {
-            return;
+            return $response->status();
         }
 
         if ($response->status() >= 400 && $response->status() < 500) {

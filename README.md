@@ -25,6 +25,29 @@ You can delete everything above this and input your own instructions specific to
 
 A API REST externa está documentada em [`docs/api/openapi.yaml`](docs/api/openapi.yaml) (OpenAPI 3.1). Renderize com `npx @redocly/cli preview-docs docs/api/openapi.yaml`.
 
+### Monitoramento periódico de processos
+
+`POST /api/processo/monitoramentos` assina o acompanhamento de um processo a
+cada `intervalo_horas` (1 a 720). O comando `monitoramentos:despachar` roda a
+cada 30 minutos, seleciona os monitoramentos vencidos e os enfileira na fila
+**serial** `monitoramento` (`maxProcesses: 1` no Horizon — o tribunal é
+consultado um processo por vez). Cada execução atualiza o processo e dispara o
+webhook `processo.monitoramento.executado` para a `callback_url` informada,
+sempre — com `houve_alteracao` e a lista dos movimentos/documentos novos.
+
+Dois pontos que diferem do resto da API:
+
+- **Documentos entram só como metadados.** O ciclo de monitoramento não baixa os
+  binários; o conteúdo continua sob demanda em `/documento/visualizar`.
+- **Credenciais PJe vão no body e ficam cifradas** na tabela `credenciais_pje`
+  (cast `encrypted`, APP_KEY). A API nunca as devolve — só `login_mascarado`.
+  Sem credencial no payload, cada execução usa o par padrão do `.env`.
+  **Rotacionar a `APP_KEY` invalida as credenciais já salvas.**
+
+Comandos de apoio: `monitoramentos:reenviar-webhook` (redespacha callbacks
+pendentes) e `monitoramentos:limpar-execucoes --dias=90` (retenção do
+histórico, agendado diariamente).
+
 ---
 
 # Local Development Setup Guide

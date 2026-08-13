@@ -7,3 +7,6 @@ Schedule::command('mni:consultar-orgao')->dailyAt('04:00');
 Schedule::command('cnj:consultar-classes')->dailyAt('04:00');
 Schedule::command('cnj:consultar-assuntos')->sundays()->at('05:00');
 Schedule::command('mni:consultar-tipos-documentos')->dailyAt('3:00');
+
+Schedule::command('monitoramentos:despachar')->everyThirtyMinutes()->withoutOverlapping();
+Schedule::command('monitoramentos:limpar-execucoes')->dailyAt('04:30');

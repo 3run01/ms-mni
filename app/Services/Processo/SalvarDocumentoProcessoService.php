@@ -15,23 +15,23 @@ use Illuminate\Support\Facades\Process;
 
 class SalvarDocumentoProcessoService
 {
-    public function execute($processo, $documentos, $login_pje = null, $senha_pje = null)
+    public function execute($processo, $documentos, $login_pje = null, $senha_pje = null, bool $baixar_binarios = true)
     {
         $documentos = is_array($documentos) ? $documentos : [$documentos];
 
         foreach ($documentos as $documento) {
 
-            $this->salvarDocumento($processo, $documento, $login_pje, $senha_pje);
+            $this->salvarDocumento($processo, $documento, $login_pje, $senha_pje, $baixar_binarios);
             if (isset($documento->documentoVinculado)) {
                 $documentoVinculado = is_array($documento->documentoVinculado) ? $documento->documentoVinculado : [$documento->documentoVinculado];
                 foreach ($documentoVinculado as $documentoVinculado) {
-                    $this->salvarDocumento($processo, $documentoVinculado, $login_pje, $senha_pje);
+                    $this->salvarDocumento($processo, $documentoVinculado, $login_pje, $senha_pje, $baixar_binarios);
                 }
             }
         }
     }
 
-    public function salvarDocumento($processo, $documento, $login_pje = null, $senha_pje = null)
+    public function salvarDocumento($processo, $documento, $login_pje = null, $senha_pje = null, bool $baixar_binarios = true)
     {
         $processoDocumento = ProcessoDocumento::updateOrCreate(
             [
@@ -52,7 +52,7 @@ class SalvarDocumentoProcessoService
             ]
         );
 
-        if ($processoDocumento->status != ProcessoDocumento::STATUS_BAIXADO) {
+        if ($baixar_binarios && $processoDocumento->status != ProcessoDocumento::STATUS_BAIXADO) {
             BaixarDocumentoMNIJob::dispatch($processoDocumento, $login_pje, $senha_pje)->onQueue('mni-download');
         }
     }

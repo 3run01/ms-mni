@@ -11,7 +11,15 @@ function rotuloLink(label: string): string {
     return label;
 }
 
-export function Pagination({ paginator }: { paginator: Paginated<unknown> }) {
+export function Pagination({
+    paginator,
+    only = ['processos'],
+}: {
+    paginator: Paginated<unknown>;
+    // props recarregadas na navegação parcial: precisa bater com a prop que
+    // carrega o paginator na página, senão a tabela não atualiza.
+    only?: string[];
+}) {
     if (paginator.total === 0) return null;
 
     return (
@@ -29,7 +37,7 @@ export function Pagination({ paginator }: { paginator: Paginated<unknown> }) {
                         asChild={Boolean(link.url)}
                     >
                         {link.url ? (
-                            <Link href={link.url} preserveScroll preserveState only={['processos']}>
+                            <Link href={link.url} preserveScroll preserveState only={only}>
                                 <span dangerouslySetInnerHTML={{ __html: rotuloLink(link.label) }} />
                             </Link>
                         ) : (

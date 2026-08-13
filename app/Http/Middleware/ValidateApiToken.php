@@ -28,6 +28,8 @@ class ValidateApiToken
 
         $apiToken->registrarUso();
 
+        $request->attributes->set('apiToken', $apiToken);
+
         return $next($request);
     }
 }
