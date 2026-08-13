@@ -89,34 +89,49 @@ RUN apk update && apk upgrade && \
     make \
     libc-dev
 
-# Extensões PHP (mesmo conjunto da produção + xdebug/pcov para dev)
-RUN install-php-extensions \
-    bcmath \
-    bz2 \
-    exif \
-    gd \
-    igbinary \
-    intl \
-    ldap \
-    mbstring \
-    memcached \
-    opcache \
-    pcntl \
-    pcov \
-    pdo_pgsql \
-    pgsql \
-    redis \
-    sockets \
-    soap \
-    uv \
-    vips \
-    xdebug \
-    zip
+# Extensões PHP (mesmo conjunto da produção + xdebug/pcov para dev).
+# Parte vem do PECL, que oscila e aborta o install inteiro; o laço tenta 3
+# vezes e o install-php-extensions pula o que já instalou, retomando de onde
+# parou. Se as 3 falharem, o build falha mesmo (são obrigatórias).
+RUN set -eu; \
+    tentativa=1; \
+    until install-php-extensions \
+            bcmath \
+            bz2 \
+            exif \
+            gd \
+            igbinary \
+            intl \
+            ldap \
+            mbstring \
+            opcache \
+            pcntl \
+            pcov \
+            pdo_pgsql \
+            pgsql \
+            redis \
+            sockets \
+            soap \
+            uv \
+            vips \
+            xdebug \
+            zip; do \
+        if [ "$tentativa" -ge 3 ]; then \
+            echo 'ERRO: install-php-extensions falhou nas 3 tentativas'; \
+            exit 1; \
+        fi; \
+        tentativa=$((tentativa + 1)); \
+        echo "AVISO: install-php-extensions falhou; tentativa ${tentativa}/3 em 20s"; \
+        sleep 20; \
+    done
 
-# excimer é opcional (profiling do Sentry) e o PECL já publicou versão sem REST
-# xml, quebrando o build inteiro. Tenta a última, cai para a 1.2.5 e segue sem
-# profiling se as duas falharem.
-RUN (install-php-extensions excimer \
+# Acessórias e opcionais — ambas do PECL, que já derrubou builds duas vezes.
+# memcached não é usado (CACHE_STORE/SESSION_DRIVER são `database`) e excimer
+# só habilita o profiling do Sentry. Segue sem elas em vez de quebrar o build.
+RUN (install-php-extensions memcached \
+        || (sleep 20 && install-php-extensions memcached) \
+        || echo 'AVISO: memcached indisponivel no PECL; imagem sem o driver de cache memcached') && \
+    (install-php-extensions excimer \
         || install-php-extensions excimer-1.2.5 \
         || echo 'AVISO: excimer indisponivel no PECL; imagem sem profiling do Sentry') && \
     docker-php-source delete && \

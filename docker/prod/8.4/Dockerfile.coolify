@@ -64,34 +64,55 @@ RUN apk add --no-cache \
     && (apk add --no-cache postgresql${POSTGRES_VERSION}-client \
         || apk add --no-cache postgresql16-client)
 
-# Extensões PHP de produção. xdebug e pcov ficam fora.
-RUN install-php-extensions \
-        bcmath \
-        bz2 \
-        exif \
-        gd \
-        igbinary \
-        intl \
-        ldap \
-        mbstring \
-        memcached \
-        opcache \
-        pcntl \
-        pdo_pgsql \
-        pgsql \
-        redis \
-        sockets \
-        soap \
-        uv \
-        vips \
-        zip
+# Extensões PHP de produção — as que a aplicação realmente precisa. xdebug e
+# pcov ficam fora. Parte delas vem do PECL, que é um ponto único de falha fora
+# do nosso controle: quando o pecl.php.net oscila, o install aborta e o deploy
+# inteiro cai. Por isso o comando roda dentro de um laço com 3 tentativas —
+# install-php-extensions pula o que já está instalado, então a retentativa
+# retoma de onde parou. Se as 3 falharem, o build falha mesmo (são obrigatórias).
+RUN set -eu; \
+    tentativa=1; \
+    until install-php-extensions \
+            bcmath \
+            bz2 \
+            exif \
+            gd \
+            igbinary \
+            intl \
+            ldap \
+            mbstring \
+            opcache \
+            pcntl \
+            pdo_pgsql \
+            pgsql \
+            redis \
+            sockets \
+            soap \
+            uv \
+            vips \
+            zip; do \
+        if [ "$tentativa" -ge 3 ]; then \
+            echo 'ERRO: install-php-extensions falhou nas 3 tentativas'; \
+            exit 1; \
+        fi; \
+        tentativa=$((tentativa + 1)); \
+        echo "AVISO: install-php-extensions falhou; tentativa ${tentativa}/3 em 20s"; \
+        sleep 20; \
+    done
 
-# excimer é opcional: só habilita o profiling do Sentry
-# (config/sentry.php → profiles_sample_rate, inativo sem SENTRY_PROFILES_SAMPLE_RATE).
-# O PECL publicou a 1.2.6 sem REST xml e isso derrubou o deploy inteiro; aqui a
-# instalação tenta a última versão, cai para a 1.2.5 e, se as duas falharem,
-# segue sem profiling em vez de quebrar o build por uma extensão acessória.
-RUN (install-php-extensions excimer \
+# Extensões acessórias, todas vindas do PECL — que já derrubou dois deploys
+# seguidos ("does not have REST xml available" no excimer, "No releases
+# available" no memcached). Nenhuma das duas é usada pela aplicação:
+#   - memcached: CACHE_STORE e SESSION_DRIVER são `database` (.env.example) e
+#     nenhum código referencia o store memcached de config/cache.php;
+#   - excimer: só habilita o profiling do Sentry (config/sentry.php →
+#     profiles_sample_rate, inativo sem SENTRY_PROFILES_SAMPLE_RATE).
+# Então aqui tenta instalar e, se o PECL estiver fora do ar, segue sem elas em
+# vez de quebrar o deploy por uma extensão que ninguém chama.
+RUN (install-php-extensions memcached \
+        || (sleep 20 && install-php-extensions memcached) \
+        || echo 'AVISO: memcached indisponivel no PECL; imagem sem o driver de cache memcached') \
+    && (install-php-extensions excimer \
         || install-php-extensions excimer-1.2.5 \
         || echo 'AVISO: excimer indisponivel no PECL; imagem sem profiling do Sentry') \
     && docker-php-source delete \
