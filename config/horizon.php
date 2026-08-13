@@ -323,6 +323,34 @@ return [
                 'maxProcesses' => 1,
             ],
         ],
+
+        /*
+         * Fallback para qualquer outro APP_ENV (homolog, dev, staging...).
+         * O Horizon casa o nome do ambiente com Str::is(), então '*' pega o
+         * que não bateu acima — e como a busca para no primeiro match,
+         * `production` e `local` continuam com os valores próprios.
+         *
+         * Sem esta entrada, um APP_ENV fora da lista faz o Horizon subir
+         * ZERO supervisores, em silêncio: as filas simplesmente não são
+         * consumidas e os jobs se acumulam como pendentes.
+         */
+        '*' => [
+            'supervisor-default' => [
+                'maxProcesses' => 2,
+            ],
+            'supervisor-mni-download' => [
+                'maxProcesses' => 4,
+            ],
+            'supervisor-exportar' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-monitoramento' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-monitoramento-webhook' => [
+                'maxProcesses' => 1,
+            ],
+        ],
     ],
 
     /*
