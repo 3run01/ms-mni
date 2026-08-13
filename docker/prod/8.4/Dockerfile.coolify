@@ -69,7 +69,6 @@ RUN install-php-extensions \
         bcmath \
         bz2 \
         exif \
-        excimer \
         gd \
         igbinary \
         intl \
@@ -85,7 +84,16 @@ RUN install-php-extensions \
         soap \
         uv \
         vips \
-        zip \
+        zip
+
+# excimer é opcional: só habilita o profiling do Sentry
+# (config/sentry.php → profiles_sample_rate, inativo sem SENTRY_PROFILES_SAMPLE_RATE).
+# O PECL publicou a 1.2.6 sem REST xml e isso derrubou o deploy inteiro; aqui a
+# instalação tenta a última versão, cai para a 1.2.5 e, se as duas falharem,
+# segue sem profiling em vez de quebrar o build por uma extensão acessória.
+RUN (install-php-extensions excimer \
+        || install-php-extensions excimer-1.2.5 \
+        || echo 'AVISO: excimer indisponivel no PECL; imagem sem profiling do Sentry') \
     && docker-php-source delete \
     && rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
 
