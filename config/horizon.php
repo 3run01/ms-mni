@@ -256,7 +256,9 @@ return [
         'supervisor-monitoramento' => [
             'connection' => 'redis',
             'queue' => ['monitoramento'],
-            'balance' => false,
+            // 'off' é o valor do Horizon para "sem balanceamento": pool único,
+            // e o autoscaler mira min(maxProcesses, ...) = 1 worker.
+            'balance' => 'off',
             'minProcesses' => 1,
             'maxProcesses' => 1,
             'maxTime' => 3600,

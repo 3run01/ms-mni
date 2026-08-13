@@ -14,14 +14,24 @@ it('gera uuid ao criar', function () {
 });
 
 it('scope vencidos pega só ativo, vencido e não bloqueado', function () {
-    $vencido = ProcessoMonitoramento::factory()->vencido()->create();
-    ProcessoMonitoramento::factory()->create(['proxima_execucao_em' => now()->addHour()]);
-    ProcessoMonitoramento::factory()->vencido()->pausado()->create();
-    ProcessoMonitoramento::factory()->vencido()->suspenso()->create();
-    ProcessoMonitoramento::factory()->vencido()->create(['bloqueado_ate' => now()->addHour()]);
-    $lockExpirado = ProcessoMonitoramento::factory()->vencido()->create(['bloqueado_ate' => now()->subMinute()]);
+    // escopado ao token do teste: o banco de dev pode ter outros vencidos
+    $token = \App\Models\ApiToken::factory()->create();
+    $doTeste = fn (array $estado = []) => ProcessoMonitoramento::factory()
+        ->create($estado + ['api_token_id' => $token->id]);
 
-    $ids = ProcessoMonitoramento::vencidos()->pluck('id');
+    $vencido = ProcessoMonitoramento::factory()->vencido()->create(['api_token_id' => $token->id]);
+    $lockExpirado = ProcessoMonitoramento::factory()->vencido()->create([
+        'api_token_id' => $token->id, 'bloqueado_ate' => now()->subMinute(),
+    ]);
+
+    $doTeste(['proxima_execucao_em' => now()->addHour()]);
+    ProcessoMonitoramento::factory()->vencido()->pausado()->create(['api_token_id' => $token->id]);
+    ProcessoMonitoramento::factory()->vencido()->suspenso()->create(['api_token_id' => $token->id]);
+    ProcessoMonitoramento::factory()->vencido()->create([
+        'api_token_id' => $token->id, 'bloqueado_ate' => now()->addHour(),
+    ]);
+
+    $ids = ProcessoMonitoramento::vencidos()->doToken($token->id)->pluck('id');
 
     expect($ids)->toContain($vencido->id)
         ->toContain($lockExpirado->id)

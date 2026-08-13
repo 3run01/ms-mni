@@ -9,18 +9,34 @@ uses(DatabaseTransactions::class);
 
 beforeEach(fn () => Queue::fake());
 
+/**
+ * Quantas vezes o monitoramento indicado foi enfileirado. As asserções são
+ * sempre por id: o comando é global e um banco de desenvolvimento pode ter
+ * outros monitoramentos vencidos, que não são problema deste teste.
+ */
+function despachosDe(ProcessoMonitoramento $monitoramento): int
+{
+    return Queue::pushed(
+        ExecutarMonitoramentoProcessoJob::class,
+        fn ($job) => $job->monitoramentoId === $monitoramento->id
+    )->count();
+}
+
 it('despacha só os vencidos e ativos na fila monitoramento', function () {
     $vencido = ProcessoMonitoramento::factory()->vencido()->create();
-    ProcessoMonitoramento::factory()->create(['proxima_execucao_em' => now()->addHour()]);
-    ProcessoMonitoramento::factory()->vencido()->pausado()->create();
-    ProcessoMonitoramento::factory()->vencido()->suspenso()->create();
-    ProcessoMonitoramento::factory()->vencido()->create(['bloqueado_ate' => now()->addHour()]);
+    $futuro = ProcessoMonitoramento::factory()->create(['proxima_execucao_em' => now()->addHour()]);
+    $pausado = ProcessoMonitoramento::factory()->vencido()->pausado()->create();
+    $suspenso = ProcessoMonitoramento::factory()->vencido()->suspenso()->create();
+    $bloqueado = ProcessoMonitoramento::factory()->vencido()->create(['bloqueado_ate' => now()->addHour()]);
 
-    $this->artisan('monitoramentos:despachar')
-        ->expectsOutputToContain('1 monitoramento(s) despachado(s).')
-        ->assertSuccessful();
+    $this->artisan('monitoramentos:despachar')->assertSuccessful();
 
-    Queue::assertPushed(ExecutarMonitoramentoProcessoJob::class, 1);
+    expect(despachosDe($vencido))->toBe(1)
+        ->and(despachosDe($futuro))->toBe(0)
+        ->and(despachosDe($pausado))->toBe(0)
+        ->and(despachosDe($suspenso))->toBe(0)
+        ->and(despachosDe($bloqueado))->toBe(0);
+
     Queue::assertPushed(ExecutarMonitoramentoProcessoJob::class, fn ($job) => $job->monitoramentoId === $vencido->id
         && $job->queue === 'monitoramento');
 });
@@ -38,14 +54,12 @@ it('reagenda pelo intervalo e aplica o lock de despacho', function () {
 });
 
 it('segunda rodada imediata não redespacha o mesmo monitoramento', function () {
-    ProcessoMonitoramento::factory()->vencido()->create();
+    $monitoramento = ProcessoMonitoramento::factory()->vencido()->create();
 
     $this->artisan('monitoramentos:despachar')->assertSuccessful();
-    $this->artisan('monitoramentos:despachar')
-        ->expectsOutputToContain('0 monitoramento(s) despachado(s).')
-        ->assertSuccessful();
+    $this->artisan('monitoramentos:despachar')->assertSuccessful();
 
-    Queue::assertPushed(ExecutarMonitoramentoProcessoJob::class, 1);
+    expect(despachosDe($monitoramento))->toBe(1);
 });
 
 it('recupera monitoramento com lock expirado', function () {
@@ -55,15 +69,13 @@ it('recupera monitoramento com lock expirado', function () {
 
     $this->artisan('monitoramentos:despachar')->assertSuccessful();
 
-    Queue::assertPushed(ExecutarMonitoramentoProcessoJob::class, fn ($job) => $job->monitoramentoId === $preso->id);
+    expect(despachosDe($preso))->toBe(1);
 });
 
-it('sem vencidos não despacha nada', function () {
-    ProcessoMonitoramento::factory()->create(['proxima_execucao_em' => now()->addHour()]);
+it('não despacha monitoramento com execução ainda no futuro', function () {
+    $futuro = ProcessoMonitoramento::factory()->create(['proxima_execucao_em' => now()->addHour()]);
 
-    $this->artisan('monitoramentos:despachar')
-        ->expectsOutputToContain('0 monitoramento(s) despachado(s).')
-        ->assertSuccessful();
+    $this->artisan('monitoramentos:despachar')->assertSuccessful();
 
-    Queue::assertNothingPushed();
+    expect(despachosDe($futuro))->toBe(0);
 });

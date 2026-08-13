@@ -26,16 +26,25 @@ it('falha quando execucao_id não existe', function () {
 });
 
 it('sem argumento, redespacha só pendentes com mais de 1 hora', function () {
+    // o comando é global: conta o que já existe para montar a expectativa
+    $pendentesAntes = ProcessoMonitoramentoExecucao::query()
+        ->whereNull('webhook_enviado_em')
+        ->where('created_at', '<=', now()->subHour())
+        ->count();
+
     $antiga = ProcessoMonitoramentoExecucao::factory()->create(['created_at' => now()->subHours(2)]);
-    ProcessoMonitoramentoExecucao::factory()->create(['created_at' => now()->subMinutes(30)]);
-    ProcessoMonitoramentoExecucao::factory()->webhookEnviado()->create(['created_at' => now()->subHours(2)]);
+    $recente = ProcessoMonitoramentoExecucao::factory()->create(['created_at' => now()->subMinutes(30)]);
+    $jaEnviada = ProcessoMonitoramentoExecucao::factory()->webhookEnviado()->create(['created_at' => now()->subHours(2)]);
+
+    $total = $pendentesAntes + 1;
 
     $this->artisan('monitoramentos:reenviar-webhook')
-        ->expectsConfirmation('Redespachar webhook para 1 execução(ões)?', 'yes')
+        ->expectsConfirmation("Redespachar webhook para {$total} execução(ões)?", 'yes')
         ->assertSuccessful();
 
-    Queue::assertPushed(EnviarWebhookMonitoramentoJob::class, 1);
     Queue::assertPushed(EnviarWebhookMonitoramentoJob::class, fn ($job) => $job->execucaoId === $antiga->id);
+    Queue::assertNotPushed(EnviarWebhookMonitoramentoJob::class, fn ($job) => $job->execucaoId === $recente->id
+        || $job->execucaoId === $jaEnviada->id);
 });
 
 it('flag --reset-tentativas zera o contador antes de redespachar', function () {
