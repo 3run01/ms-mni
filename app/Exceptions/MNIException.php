@@ -3,6 +3,7 @@
 namespace App\Exceptions;
 
 //use App\Models\MniLog;
+use App\Services\MNI\PadronizarMensagemMniService;
 use Exception;
 
 class MNIException extends Exception
@@ -12,7 +13,9 @@ class MNIException extends Exception
 
     public function __construct($error, $code)
     {
-        $this->error = $error;
+        // Ponto único de padronização: toda mensagem crua do MNI/PJe entra no
+        // sistema por aqui e sai por getError() — API, webhook, dashboard, log.
+        $this->error = PadronizarMensagemMniService::normalizar($error);
         $this->code = $code;
         //        MniLog::create(['mensagem' => $error]);
     }
