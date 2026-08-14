@@ -205,6 +205,21 @@ it('registra falha, incrementa contador e notifica mesmo assim', function () {
     Queue::assertPushed(EnviarWebhookMonitoramentoJob::class);
 });
 
+it('grava a mensagem de login já padronizada no erro_resumo', function () {
+    // é este texto que aparece no tooltip da dashboard e no payload do webhook
+    $this->mock(ProcessoService::class, function ($mock) {
+        $mock->shouldReceive('consultarNumero')
+            ->once()
+            ->andThrow(new MNIException('Erro ao realizar login via MNI. exception invoking: loginFailed', 500));
+    });
+
+    (new ExecutarMonitoramentoProcessoJob($this->monitoramento->id))->handle();
+
+    $execucao = ProcessoMonitoramentoExecucao::where('monitoramento_id', $this->monitoramento->id)->first();
+
+    expect($execucao->erro_resumo)->toBe('Erro ao realizar login via MNI. Verifique suas credenciais.');
+});
+
 it('suspende o monitoramento na quinta falha consecutiva', function () {
     $this->monitoramento->update(['falhas_consecutivas' => 4]);
 
