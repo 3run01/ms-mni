@@ -122,15 +122,40 @@ it('rejeita par de credenciais incompleto', function () {
         ->assertStatus(422)->assertJsonValidationErrors('login_pje');
 });
 
-it('retorna 409 com o uuid existente ao duplicar e libera após cancelar', function () {
+it('repetir o POST atualiza o monitoramento existente em vez de conflitar', function () {
     $primeiro = $this->withHeaders($this->headers)
-        ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal))
+        ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal, [
+            'login_pje' => '12345678900',
+            'senha_pje' => 'senha-errada',
+        ]))
         ->assertStatus(201)->json('data.uuid');
 
     $this->withHeaders($this->headers)
+        ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal, [
+            'intervalo_horas' => 12,
+            'callback_url' => 'https://example.com/webhook-novo',
+            'callback_token' => 'tok-novo',
+            'login_pje' => '99988877700',
+            'senha_pje' => 'senha-certa',
+        ]))
+        ->assertStatus(200)
+        ->assertJsonPath('data.uuid', $primeiro)
+        ->assertJsonPath('data.intervalo_horas', 12)
+        ->assertJsonPath('data.callback_url', 'https://example.com/webhook-novo')
+        ->assertJsonPath('data.credencial.login_mascarado', '999*****700');
+
+    $monitoramento = ProcessoMonitoramento::where('uuid', $primeiro)->first();
+
+    expect($monitoramento->callback_token)->toBe('tok-novo')
+        ->and($monitoramento->credencial->senha)->toBe('senha-certa')
+        // não criou um segundo monitoramento para o mesmo processo
+        ->and(ProcessoMonitoramento::doToken($this->token->id)->count())->toBe(1);
+});
+
+it('depois de cancelar, o POST cria um monitoramento novo', function () {
+    $primeiro = $this->withHeaders($this->headers)
         ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal))
-        ->assertStatus(409)
-        ->assertJson(['uuid' => $primeiro]);
+        ->assertStatus(201)->json('data.uuid');
 
     $this->withHeaders($this->headers)
         ->deleteJson("/api/processo/monitoramentos/{$primeiro}")
@@ -138,7 +163,60 @@ it('retorna 409 com o uuid existente ao duplicar e libera após cancelar', funct
 
     $this->withHeaders($this->headers)
         ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal))
-        ->assertStatus(201);
+        ->assertStatus(201)
+        ->assertJsonMissing(['uuid' => $primeiro]);
+});
+
+it('o POST repetido mantém a credencial quando o par não vem', function () {
+    $criado = $this->withHeaders($this->headers)
+        ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal, [
+            'login_pje' => '12345678900',
+            'senha_pje' => 'segredo-pje',
+        ]))
+        ->assertStatus(201)->json('data');
+
+    $this->withHeaders($this->headers)
+        ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal, ['intervalo_horas' => 24]))
+        ->assertStatus(200)
+        ->assertJsonPath('data.intervalo_horas', 24)
+        // omitir o par não pode derrubar o monitoramento para o par do .env
+        ->assertJsonPath('data.credencial.login_mascarado', '123*****900');
+
+    expect(ProcessoMonitoramento::where('uuid', $criado['uuid'])->first()->credencial_id)->not->toBeNull();
+});
+
+it('o POST repetido não retoma o que foi pausado de propósito', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->pausado()->create([
+        'api_token_id' => $this->token->id,
+        'tribunal_id' => $this->tribunal->id,
+        'numero_processo' => '00008323520244013200',
+    ]);
+
+    $this->withHeaders($this->headers)
+        ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal, [
+            'login_pje' => '12345678900',
+            'senha_pje' => 'segredo-pje',
+        ]))
+        ->assertStatus(200)
+        ->assertJsonPath('data.uuid', $monitoramento->uuid)
+        ->assertJsonPath('data.status', 'pausado');
+});
+
+it('token no limite ainda consegue atualizar o que já monitora', function () {
+    config()->set('pje.monitoramento.max_ativos_por_token', 1);
+
+    $uuid = $this->withHeaders($this->headers)
+        ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal))
+        ->assertStatus(201)->json('data.uuid');
+
+    $this->withHeaders($this->headers)
+        ->postJson('/api/processo/monitoramentos', payloadMonitoramento($this->tribunal, [
+            'login_pje' => '12345678900',
+            'senha_pje' => 'segredo-pje',
+        ]))
+        ->assertStatus(200)
+        ->assertJsonPath('data.uuid', $uuid)
+        ->assertJsonPath('data.credencial.login_mascarado', '123*****900');
 });
 
 it('respeita o limite de monitoramentos ativos por token', function () {
@@ -216,6 +294,173 @@ it('atualiza intervalo e callback', function () {
         ->assertJsonPath('data.callback_url', 'https://example.com/outro-webhook');
 
     expect($monitoramento->fresh()->callback_token)->toBe('tok-novo');
+});
+
+it('atualiza as credenciais PJe via PATCH sem devolver segredo', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->create([
+        'api_token_id' => $this->token->id,
+        'tribunal_id' => $this->tribunal->id,
+    ]);
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", [
+            'login_pje' => '12345678900',
+            'senha_pje' => 'segredo-pje',
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.credencial.login_mascarado', '123*****900')
+        ->assertJsonMissingPath('data.credencial.senha');
+
+    $this->assertDatabaseMissing('credenciais_pje', ['senha' => 'segredo-pje']);
+
+    expect($monitoramento->fresh()->credencial->senha)->toBe('segredo-pje');
+});
+
+it('PATCH troca a senha mantendo o mesmo login', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->create([
+        'api_token_id' => $this->token->id,
+        'tribunal_id' => $this->tribunal->id,
+    ]);
+
+    $patch = fn (string $senha) => $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", [
+            'login_pje' => '12345678900',
+            'senha_pje' => $senha,
+        ])->assertOk();
+
+    $patch('senha-antiga');
+    $credencialId = $monitoramento->fresh()->credencial_id;
+
+    $patch('senha-nova');
+
+    // mesmo login = mesma credencial, só a senha muda
+    expect($monitoramento->fresh()->credencial_id)->toBe($credencialId)
+        ->and($monitoramento->fresh()->credencial->senha)->toBe('senha-nova');
+});
+
+it('PATCH sem o par mantém a credencial atual', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->create([
+        'api_token_id' => $this->token->id,
+        'tribunal_id' => $this->tribunal->id,
+    ]);
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", [
+            'login_pje' => '12345678900',
+            'senha_pje' => 'segredo-pje',
+        ])->assertOk();
+
+    $credencialId = $monitoramento->fresh()->credencial_id;
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", ['intervalo_horas' => 8])
+        ->assertOk()
+        ->assertJsonPath('data.intervalo_horas', 8);
+
+    expect($monitoramento->fresh()->credencial_id)->toBe($credencialId);
+});
+
+it('PATCH rejeita par de credenciais incompleto', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->create(['api_token_id' => $this->token->id]);
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", ['login_pje' => 'so-login'])
+        ->assertStatus(422)->assertJsonValidationErrors('senha_pje');
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", ['senha_pje' => 'so-senha'])
+        ->assertStatus(422)->assertJsonValidationErrors('login_pje');
+});
+
+it('credencial nova tira da suspensão, zera falhas e antecipa a execução', function () {
+    // o caso que motivou tudo: suspenso por 5 falhas de login
+    $monitoramento = ProcessoMonitoramento::factory()->suspenso()->create([
+        'api_token_id' => $this->token->id,
+        'tribunal_id' => $this->tribunal->id,
+        'falhas_consecutivas' => 5,
+        'proxima_execucao_em' => now()->addDays(3),
+    ]);
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", [
+            'login_pje' => '12345678900',
+            'senha_pje' => 'senha-certa',
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.status', 'ativo')
+        ->assertJsonPath('data.falhas_consecutivas', 0);
+
+    expect($monitoramento->fresh()->proxima_execucao_em->diffInMinutes(now(), true))->toBeLessThan(2);
+});
+
+it('credencial repetida não mexe no agendamento nem no status', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->pausado()->create([
+        'api_token_id' => $this->token->id,
+        'tribunal_id' => $this->tribunal->id,
+    ]);
+
+    $credenciais = ['login_pje' => '12345678900', 'senha_pje' => 'segredo-pje'];
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", $credenciais)->assertOk();
+
+    $monitoramento->update(['proxima_execucao_em' => now()->addDays(3), 'falhas_consecutivas' => 2]);
+    $agendamento = $monitoramento->fresh()->proxima_execucao_em;
+
+    // mesma credencial de novo: nada a corrigir, nada a reagendar
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", $credenciais)
+        ->assertOk()
+        ->assertJsonPath('data.status', 'pausado')
+        ->assertJsonPath('data.falhas_consecutivas', 2);
+
+    expect($monitoramento->fresh()->proxima_execucao_em->eq($agendamento))->toBeTrue();
+});
+
+it('encurtar o intervalo reancora a próxima execução na última', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->create([
+        'api_token_id' => $this->token->id,
+        'intervalo_horas' => 24,
+        'ultima_execucao_em' => now()->subHours(10),
+        'proxima_execucao_em' => now()->addHours(14),
+    ]);
+
+    // 24h -> 2h: a execução de 10h atrás já venceria há 8h, então vai para agora
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", ['intervalo_horas' => 2])
+        ->assertOk();
+
+    expect($monitoramento->fresh()->proxima_execucao_em->diffInMinutes(now(), true))->toBeLessThan(2);
+});
+
+it('alongar o intervalo reagenda para frente a partir da última execução', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->create([
+        'api_token_id' => $this->token->id,
+        'intervalo_horas' => 6,
+        'ultima_execucao_em' => now()->subHours(2),
+        'proxima_execucao_em' => now()->addHours(4),
+    ]);
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", ['intervalo_horas' => 48])
+        ->assertOk();
+
+    // 2h atrás + 48h = daqui a 46h
+    expect($monitoramento->fresh()->proxima_execucao_em->diffInHours(now(), true))->toBeGreaterThan(45);
+});
+
+it('mudar o intervalo de quem nunca executou não adia o primeiro tick', function () {
+    $monitoramento = ProcessoMonitoramento::factory()->create([
+        'api_token_id' => $this->token->id,
+        'ultima_execucao_em' => null,
+        'proxima_execucao_em' => now(),
+    ]);
+
+    $this->withHeaders($this->headers)
+        ->patchJson("/api/processo/monitoramentos/{$monitoramento->uuid}", ['intervalo_horas' => 48])
+        ->assertOk();
+
+    expect($monitoramento->fresh()->proxima_execucao_em->diffInMinutes(now(), true))->toBeLessThan(2);
 });
 
 it('pausa e retoma zerando falhas', function () {

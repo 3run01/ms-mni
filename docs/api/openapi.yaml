@@ -348,7 +348,7 @@ paths:
   /processo/monitoramentos:
     post:
       tags: [Monitoramentos]
-      summary: Criar monitoramento de processo
+      summary: Criar ou atualizar monitoramento de processo
       description: |
         Assina o monitoramento periódico de um processo. A primeira execução
         entra no próximo tick do agendador (até 30 min).
@@ -356,12 +356,31 @@ paths:
         `login_pje`/`senha_pje` são opcionais e formam um **par atômico** (um sem
         o outro → 422). Quando informados, são cifrados em `credenciais_pje`;
         quando ausentes, cada execução usa o par padrão do ambiente.
+
+        **Repetir o POST para o mesmo (token, tribunal, processo) atualiza o
+        monitoramento existente e responde `200`** — é o caminho para corrigir
+        uma credencial errada sem cancelar e recriar. `201` só quando criou de
+        fato. Na atualização:
+
+        - `intervalo_horas`, `callback_url` e `callback_token` são sobrescritos;
+        - omitir o par de credenciais **mantém** a credencial atual;
+        - credencial nova zera `falhas_consecutivas`, tira o monitoramento de
+          `suspenso` e antecipa a próxima execução para o tick seguinte;
+        - `pausado` continua pausado: retomar é o `PATCH` com `status: ativo`.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/MonitoramentoCriar' }
       responses:
+        '200':
+          description: Já existia monitoramento para o processo; foi atualizado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Monitoramento' }
         '201':
           description: Monitoramento criado.
           content:
@@ -371,18 +390,6 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/Monitoramento' }
         '401': { $ref: '#/components/responses/Erro401' }
-        '409':
-          description: Já existe monitoramento vivo para (token, tribunal, processo).
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error: { type: string }
-                  uuid: { type: string, format: uuid, description: "uuid do monitoramento existente." }
-              example:
-                error: "Já existe monitoramento para este processo"
-                uuid: "9f1c2b3a-4d5e-6f70-8192-a3b4c5d6e7f8"
         '422': { $ref: '#/components/responses/Erro422' }
     get:
       tags: [Monitoramentos]
@@ -430,11 +437,27 @@ paths:
         '404': { $ref: '#/components/responses/Erro404Monitoramento' }
     patch:
       tags: [Monitoramentos]
-      summary: Atualizar intervalo, callback ou status
+      summary: Atualizar credenciais, intervalo, callback ou status
       description: |
-        Todos os campos são opcionais. `status` aceita apenas `ativo` e
-        `pausado` — cancelar é o `DELETE`. Retomar (`ativo`) zera
-        `falhas_consecutivas` e reagenda para o próximo tick.
+        Atualização parcial: todos os campos são opcionais e o que não vier
+        fica como está.
+
+        `status` aceita apenas `ativo` e `pausado` — cancelar é o `DELETE`.
+        Retomar (`ativo`) zera `falhas_consecutivas` e reagenda para o próximo
+        tick.
+
+        `login_pje`/`senha_pje` formam um **par atômico** (um sem o outro →
+        422) e substituem a credencial do monitoramento. Omitir os dois
+        **mantém** a credencial atual — não é o caminho para voltar ao par
+        padrão do ambiente. Trocar a credencial zera `falhas_consecutivas`,
+        tira o monitoramento de `suspenso` e antecipa a próxima execução;
+        `pausado` continua pausado.
+
+        Mudar `intervalo_horas` reancora a agenda na última execução
+        (`ultima_execucao_em + intervalo_horas`, ou o próximo tick se isso já
+        passou), então encurtar o intervalo vale na hora em vez de esperar o
+        ciclo antigo terminar. Quem ainda não executou nenhuma vez mantém o
+        agendamento do primeiro tick.
       parameters:
         - { $ref: '#/components/parameters/MonitoramentoUuid' }
       requestBody:
@@ -448,6 +471,14 @@ paths:
                 callback_url: { type: string, format: uri }
                 callback_token: { type: string, maxLength: 500 }
                 status: { type: string, enum: [ativo, pausado] }
+                login_pje:
+                  type: string
+                  maxLength: 255
+                  description: Exige `senha_pje` junto. Cifrado em repouso, nunca devolvido.
+                senha_pje:
+                  type: string
+                  maxLength: 255
+                  description: Exige `login_pje` junto. Cifrado em repouso, nunca devolvido.
       responses:
         '200':
           description: Monitoramento atualizado.
