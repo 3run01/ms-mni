@@ -29,6 +29,12 @@ class AtualizarMonitoramentoProcessoRequest extends FormRequest
                 ProcessoMonitoramento::STATUS_ATIVO,
                 ProcessoMonitoramento::STATUS_PAUSADO,
             ])],
+            // Par atômico, mesma regra da criação: senha nova sem login não diz
+            // de qual credencial se trata. Omitir os dois mantém a atual.
+            // `nullable` e não `sometimes`: com `sometimes` o campo ausente pula
+            // as próprias regras, e aí o required_with do par nunca dispararia.
+            'login_pje' => ['nullable', 'string', 'max:255', 'required_with:senha_pje'],
+            'senha_pje' => ['nullable', 'string', 'max:255', 'required_with:login_pje'],
         ];
     }
 }

@@ -35,7 +35,7 @@ consultado um processo por vez). Cada execução atualiza o processo e dispara o
 webhook `processo.monitoramento.executado` para a `callback_url` informada,
 sempre — com `houve_alteracao` e a lista dos movimentos/documentos novos.
 
-Dois pontos que diferem do resto da API:
+Três pontos que diferem do resto da API:
 
 - **Documentos entram só como metadados.** O ciclo de monitoramento não baixa os
   binários; o conteúdo continua sob demanda em `/documento/visualizar`.
@@ -43,6 +43,13 @@ Dois pontos que diferem do resto da API:
   (cast `encrypted`, APP_KEY). A API nunca as devolve — só `login_mascarado`.
   Sem credencial no payload, cada execução usa o par padrão do `.env`.
   **Rotacionar a `APP_KEY` invalida as credenciais já salvas.**
+- **O `POST` é upsert.** Repetir o `POST` para o mesmo (token, tribunal,
+  processo) atualiza o monitoramento existente e responde `200` em vez de
+  conflitar — é assim que se conserta uma credencial errada sem cancelar e
+  recriar. O `PATCH /api/processo/monitoramentos/{uuid}` faz o mesmo de forma
+  parcial. Nos dois casos, credencial nova zera `falhas_consecutivas`, tira o
+  monitoramento de `suspenso` e antecipa a próxima execução; omitir o par
+  login/senha mantém a credencial atual.
 
 Comandos de apoio: `monitoramentos:reenviar-webhook` (redespacha callbacks
 pendentes) e `monitoramentos:limpar-execucoes --dias=90` (retenção do

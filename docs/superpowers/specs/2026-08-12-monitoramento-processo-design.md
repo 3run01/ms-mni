@@ -66,8 +66,9 @@ O que já existe e é reaproveitado sem alteração:
   outro. É a primeira noção de tenancy do serviço.
 - **Intervalo em horas inteiras, 1 a 720** (1h a 30 dias), honrado com a
   resolução do tick de 30 min.
-- **Um monitoramento ativo por (token, tribunal, processo).** Recriar retorna
-  `409` com o uuid do existente, em vez de duplicar consultas ao tribunal.
+- **Um monitoramento ativo por (token, tribunal, processo).** Repetir o `POST`
+  atualiza o existente (`200`) em vez de duplicar consultas ao tribunal — é o
+  caminho para corrigir uma credencial errada sem cancelar e recriar.
 
 ## Arquitetura
 
@@ -267,10 +268,15 @@ Prefixo: `/api/processo/monitoramentos`.
 | `login_pje` | string | não | par atômico com `senha_pje` |
 | `senha_pje` | string | não | idem |
 
-`201` com o recurso. `409` se já existir monitoramento ativo para
-(token, tribunal, processo), com `{ "error": "...", "uuid": "<existente>" }`.
-`422` em validação — inclusive ao estourar
-`config('pje.monitoramento.max_ativos_por_token')` (default 500).
+`201` com o recurso quando cria. **`200` com o recurso quando já existia
+monitoramento vivo para (token, tribunal, processo)** — a rota é upsert:
+`intervalo_horas`, `callback_url` e `callback_token` são sobrescritos, o par de
+credenciais omitido mantém a credencial atual, credencial nova zera
+`falhas_consecutivas` / tira de `suspenso` / antecipa a próxima execução, e
+`pausado` continua pausado (retomar é o `PATCH`). O limite de
+`config('pje.monitoramento.max_ativos_por_token')` (default 500) só barra quem
+ocupa vaga nova: um token no teto ainda consegue corrigir o que já monitora.
+`422` em validação.
 
 ```json
 {
@@ -411,8 +417,9 @@ Cap de **500 itens por lista**; acima disso a lista é truncada e
 ## Testes (Pest)
 
 - `tests/Feature/Api/MonitoramentoProcessoTest.php` — CRUD; `401` sem token;
-  `422` para `callback_url` http/IP interno e intervalo fora da faixa; `409`
-  duplicado; `404` para uuid de outro token; credencial nunca aparece na resposta.
+  `422` para `callback_url` http/IP interno e intervalo fora da faixa; `POST`
+  repetido atualizando o existente (`200`); `404` para uuid de outro token;
+  credencial nunca aparece na resposta.
 - `tests/Unit/Models/CredencialPjeTest.php` — `assertDatabaseMissing` com a senha
   em texto puro (prova a cifra); `login_hash` estável; `login_mascarado`.
 - `tests/Feature/Console/MonitoramentosDespacharTest.php` — despacha só os
