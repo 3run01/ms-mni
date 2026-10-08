@@ -74,6 +74,19 @@ it('série diária tem N pontos contínuos terminando hoje (SP) e conta o delta 
     }
 });
 
+it('conta no dia de SP o processo criado de madrugada, antes das 03:00 (delta)', function () {
+    // created_at é gravado no timezone da aplicação: lido como UTC, cairia no dia anterior
+    $this->travelTo(now('America/Sao_Paulo')->setTime(1, 0));
+
+    $antes = metricasService()->metricas(7);
+    Processo::factory()->create();
+    $depois = metricasService()->metricas(7);
+
+    expect($depois['processosPorDia'][6]['dia'])->toBe(now('America/Sao_Paulo')->toDateString())
+        ->and($depois['processosPorDia'][6]['total'] - $antes['processosPorDia'][6]['total'])->toBe(1)
+        ->and($depois['processosPorDia'][5]['total'] - $antes['processosPorDia'][5]['total'])->toBe(0);
+});
+
 it('suporta períodos 30 e 90', function () {
     expect(metricasService()->metricas(30)['processosPorDia'])->toHaveCount(30)
         ->and(metricasService()->metricas(90)['processosPorDia'])->toHaveCount(90);

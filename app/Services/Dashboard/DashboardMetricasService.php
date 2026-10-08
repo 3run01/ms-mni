@@ -17,13 +17,13 @@ class DashboardMetricasService
         $inicioLocal = CarbonImmutable::now(self::TIMEZONE)
             ->startOfDay()
             ->subDays($periodoDias - 1);
-        $inicioUtc = $inicioLocal->setTimezone('UTC');
+        $inicioArmazenado = $inicioLocal->setTimezone($this->timezoneArmazenado());
 
         return [
             'totais' => [
-                'processos' => Processo::where('created_at', '>=', $inicioUtc)->count(),
+                'processos' => Processo::where('created_at', '>=', $inicioArmazenado)->count(),
                 'documentosBaixados' => ProcessoDocumento::where('status', ProcessoDocumento::STATUS_BAIXADO)
-                    ->where('downloaded_at', '>=', $inicioUtc)
+                    ->where('downloaded_at', '>=', $inicioArmazenado)
                     ->count(),
                 'documentosPendentes' => ProcessoDocumento::where('status', ProcessoDocumento::STATUS_PENDENTE)->count(),
                 'documentosErro' => ProcessoDocumento::where('status', ProcessoDocumento::STATUS_ERRO)->count(),
@@ -48,15 +48,17 @@ class DashboardMetricasService
 
     private function seriePorDia(Builder $query, string $coluna, CarbonImmutable $inicioLocal, int $periodoDias): array
     {
-        // timestamps são armazenados em UTC; o dia útil pro usuário é o dia em SP
+        // timestamps são armazenados no timezone da aplicação; o dia útil pro
+        // usuário é o dia em SP
         $diaExpr = sprintf(
-            "((%s AT TIME ZONE 'UTC') AT TIME ZONE '%s')::date",
+            "((%s AT TIME ZONE '%s') AT TIME ZONE '%s')::date",
             $coluna,
+            $this->timezoneArmazenado(),
             self::TIMEZONE,
         );
 
         $contagens = $query
-            ->where($coluna, '>=', $inicioLocal->setTimezone('UTC'))
+            ->where($coluna, '>=', $inicioLocal->setTimezone($this->timezoneArmazenado()))
             ->selectRaw("{$diaExpr} as dia, COUNT(*) as total")
             ->groupByRaw($diaExpr)
             ->pluck('total', 'dia');
@@ -68,5 +70,12 @@ class DashboardMetricasService
         }
 
         return $serie;
+    }
+
+    private function timezoneArmazenado(): string
+    {
+        // o Eloquent grava created_at/downloaded_at (timestamp sem timezone)
+        // no timezone da aplicação, não necessariamente em UTC
+        return config('app.timezone');
     }
 }
