@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\ProcessoDocumento;
-use App\Jobs\BaixarDocumentoMNIJob;
+use App\Services\Processo\EnfileirarDownloadDocumentosService;
 use Illuminate\Support\Facades\Log;
 
 class MediaFixInconsistent extends Command
@@ -65,6 +65,7 @@ class MediaFixInconsistent extends Command
         $corrigidos = 0;
         $enfileirados = 0;
         $erros = 0;
+        $paraEnfileirar = [];
 
         $bar = $this->output->createProgressBar($total);
         $bar->start();
@@ -77,9 +78,7 @@ class MediaFixInconsistent extends Command
                 ]);
                 $corrigidos++;
 
-                // Enfileirar para download
-                BaixarDocumentoMNIJob::dispatch($documento)->onQueue('mni-download');
-                $enfileirados++;
+                $paraEnfileirar[] = $documento;
             } catch (\Exception $e) {
                 $erros++;
                 Log::error("Erro ao corrigir documento {$documento->id}: " . $e->getMessage());
@@ -92,10 +91,26 @@ class MediaFixInconsistent extends Command
         $this->line('');
         $this->line('');
 
+        // Áudio vai em lotes por processo; cada vídeo segue com 1 BaixarDocumentoMNIJob.
+        $resumo = ['lotes' => 0, 'documentos_em_lote' => 0, 'videos' => 0, 'ignorados_trava' => 0];
+
+        try {
+            $resumo = app(EnfileirarDownloadDocumentosService::class)->enfileirar($paraEnfileirar);
+            $enfileirados = $resumo['documentos_em_lote'] + $resumo['videos'];
+        } catch (\Throwable $e) {
+            // Sem o resumo não dá para saber quais documentos ficaram com job:
+            // todos os corrigidos contam como erro.
+            $erros += count($paraEnfileirar);
+            Log::error('Erro ao enfileirar o download dos documentos corrigidos: ' . $e->getMessage());
+        }
+
         $this->info('Correção concluída!');
         $this->info("Total processado: {$total}");
         $this->info("Documentos corrigidos: {$corrigidos}");
-        $this->info("Documentos enfileirados: {$enfileirados}");
+        $this->info("Documentos enfileirados: {$enfileirados} ({$resumo['lotes']} lotes, {$resumo['videos']} vídeos)");
+        if ($resumo['ignorados_trava'] > 0) {
+            $this->comment("Já em lote em andamento: {$resumo['ignorados_trava']}");
+        }
 
         if ($erros > 0) {
             $this->error("Erros encontrados: {$erros}");

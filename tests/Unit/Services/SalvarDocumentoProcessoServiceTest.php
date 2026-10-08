@@ -1,10 +1,13 @@
 <?php
 
+use App\Jobs\BaixarDocumentoMNIJob;
+use App\Jobs\BaixarDocumentosMNIEmLoteJob;
 use App\Models\Processo;
 use App\Models\ProcessoDocumento;
 use App\Services\Processo\SalvarDocumentoProcessoService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
 uses(DatabaseTransactions::class);
@@ -26,8 +29,8 @@ function criarDocumentoHtml(array $overrides = []): ProcessoDocumento
     ], $overrides));
 }
 
-it('execute repassa credenciais pje para os jobs de download', function () {
-    \Illuminate\Support\Facades\Queue::fake();
+it('execute enfileira documento e vinculado num unico lote com as credenciais pje', function () {
+    Queue::fake();
     $processo = Processo::factory()->create([
         'numero_processo' => 'SVCS3CRED' . getmypid(),
     ]);
@@ -48,23 +51,61 @@ it('execute repassa credenciais pje para os jobs de download', function () {
     ];
 
     $service = new SalvarDocumentoProcessoService();
-    $service->execute($processo, [$documento], 'login-pje', 'senha-pje');
+    $service->execute($processo, [$documento], '{LOGIN}', '{SENHA}');
 
-    $credenciais = function ($job) {
-        $ref = new ReflectionClass($job);
-        $login = $ref->getProperty('login_pje');
-        $login->setAccessible(true);
-        $senha = $ref->getProperty('senha_pje');
-        $senha->setAccessible(true);
+    $ids = ProcessoDocumento::where('processo_id', $processo->id)
+        ->whereIn('id_documento', [930001, 930002])
+        ->orderBy('id_documento')
+        ->pluck('id')
+        ->all();
 
-        return [$login->getValue($job), $senha->getValue($job)];
-    };
+    $lote = Queue::pushed(BaixarDocumentosMNIEmLoteJob::class)->sole();
 
-    \Illuminate\Support\Facades\Queue::assertPushed(
-        \App\Jobs\BaixarDocumentoMNIJob::class,
-        fn ($job) => $credenciais($job) === ['login-pje', 'senha-pje']
+    expect($lote->queue)->toBe('mni-download')
+        ->and($lote->processoId)->toBe($processo->id)
+        ->and($lote->processoDocumentoIds)->toEqualCanonicalizing($ids)
+        ->and((fn () => [$this->login_pje, $this->senha_pje])->call($lote))->toBe(['{LOGIN}', '{SENHA}']);
+
+    Queue::assertNotPushed(BaixarDocumentoMNIJob::class);
+});
+
+it('execute nao enfileira documento ja baixado', function () {
+    Queue::fake();
+    $processo = Processo::factory()->create([
+        'numero_processo' => 'SVCS3BAIX' . getmypid(),
+    ]);
+    $baixado = ProcessoDocumento::create([
+        'processo_id' => $processo->id,
+        'id_documento' => 930011,
+        'tipo_documento' => '57',
+        'data_hora' => '2024-12-12 10:00:00',
+        'descricao' => 'Ja baixado',
+        'mimetype' => 'application/pdf',
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => 'documentos-processos/x/930011.pdf',
+    ]);
+    $documentoMni = fn (int $id) => (object) [
+        'idDocumento' => $id,
+        'tipoDocumento' => '57',
+        'dataHora' => '2024-12-12 10:00:00',
+        'mimetype' => 'application/pdf',
+        'descricao' => 'Peticao',
+    ];
+
+    (new SalvarDocumentoProcessoService())->execute(
+        $processo,
+        [$documentoMni(930011), $documentoMni(930012)],
+        '{LOGIN}',
+        '{SENHA}',
     );
-    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\BaixarDocumentoMNIJob::class, 2);
+
+    $novo = ProcessoDocumento::where('processo_id', $processo->id)->where('id_documento', 930012)->sole();
+    $lote = Queue::pushed(BaixarDocumentosMNIEmLoteJob::class)->sole();
+
+    expect($lote->processoDocumentoIds)->toBe([$novo->id])
+        ->and($lote->processoDocumentoIds)->not->toContain($baixado->id);
+
+    Queue::assertNotPushed(BaixarDocumentoMNIJob::class);
 });
 
 it('downloadHTML salva html e pdf no S3, seta path_html e nao escreve conteudo_html', function () {

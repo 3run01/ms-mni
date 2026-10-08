@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\ProcessoDocumento;
-use App\Jobs\BaixarDocumentoMNIJob;
+use App\Services\Processo\EnfileirarDownloadDocumentosService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 
@@ -89,6 +89,7 @@ class MediaRedownload extends Command
             $removidos = 0;
             $erros = 0;
             $requeued = 0;
+            $paraEnfileirar = [];
 
             $bar = $this->output->createProgressBar($documentos->count());
             $bar->start();
@@ -110,9 +111,7 @@ class MediaRedownload extends Command
                         'status' => ProcessoDocumento::STATUS_PENDENTE
                     ]);
 
-                    // Enfileirar para redownload
-                    BaixarDocumentoMNIJob::dispatch($documento)->onQueue('mni-download');
-                    $requeued++;
+                    $paraEnfileirar[] = $documento;
                 } catch (\Exception $e) {
                     $erros++;
                     Log::error("Erro ao processar documento {$documento->id}: " . $e->getMessage());
@@ -124,6 +123,20 @@ class MediaRedownload extends Command
             $bar->finish();
             $this->line('');
 
+            // Cada página é uma seleção: áudio vai em lotes por processo e
+            // cada vídeo segue com 1 BaixarDocumentoMNIJob.
+            $resumo = ['lotes' => 0, 'documentos_em_lote' => 0, 'videos' => 0, 'ignorados_trava' => 0];
+
+            try {
+                $resumo = app(EnfileirarDownloadDocumentosService::class)->enfileirar($paraEnfileirar);
+                $requeued = $resumo['documentos_em_lote'] + $resumo['videos'];
+            } catch (\Throwable $e) {
+                // Sem o resumo não dá para saber quais documentos ficaram com
+                // job: a página inteira conta como erro.
+                $erros += count($paraEnfileirar);
+                Log::error("Erro ao enfileirar o lote {$batchNumber} de redownload: " . $e->getMessage());
+            }
+
             $totalRemovidos += $removidos;
             $totalErros += $erros;
             $totalRequeued += $requeued;
@@ -131,7 +144,10 @@ class MediaRedownload extends Command
             $this->info("Lote {$batchNumber} concluído:");
             $this->info("  - Processados: {$documentos->count()}");
             $this->info("  - Removidos do S3: {$removidos}");
-            $this->info("  - Enfileirados: {$requeued}");
+            $this->info("  - Enfileirados: {$requeued} ({$resumo['lotes']} lotes, {$resumo['videos']} vídeos)");
+            if ($resumo['ignorados_trava'] > 0) {
+                $this->comment("  - Já em lote em andamento: {$resumo['ignorados_trava']}");
+            }
             if ($erros > 0) {
                 $this->error("  - Erros: {$erros}");
             }

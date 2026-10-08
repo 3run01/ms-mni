@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\BaixarDocumentoMNIJob;
 use App\Models\ProcessoDocumento;
+use App\Services\Processo\EnfileirarDownloadDocumentosService;
 use Illuminate\Console\Command;
 
 class MNIBaixarDocumentoPendente extends Command
@@ -28,8 +28,13 @@ class MNIBaixarDocumentoPendente extends Command
     public function handle()
     {
         $documentos = ProcessoDocumento::whereIn('status', [ProcessoDocumento::STATUS_ERRO])->get();
-        foreach ($documentos as $documento) {
-            BaixarDocumentoMNIJob::dispatch($documento)->onQueue('mni-download');
-        }
+
+        // Sem credenciais: cada lote usa as cadastradas no tribunal do processo.
+        $resumo = app(EnfileirarDownloadDocumentosService::class)->enfileirar($documentos);
+
+        $this->info("Documentos em erro selecionados: {$documentos->count()}");
+        $this->info("Lotes enfileirados: {$resumo['lotes']} ({$resumo['documentos_em_lote']} documentos)");
+        $this->info("Vídeos enfileirados por documento: {$resumo['videos']}");
+        $this->info("Ignorados por já estarem num lote em andamento: {$resumo['ignorados_trava']}");
     }
 }

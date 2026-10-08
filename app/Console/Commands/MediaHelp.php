@@ -61,7 +61,8 @@ class MediaHelp extends Command
 
         $this->info('⚠️  IMPORTANTE:');
         $this->comment('   • O reprocessamento remove arquivos do S3 e redefine status para PENDENTE');
-        $this->comment('   • Os documentos serão rebaixados pelos jobs BaixarDocumentoMNIJob');
+        $this->comment('   • Áudio é rebaixado em lote por processo (BaixarDocumentosMNIEmLoteJob)');
+        $this->comment('   • BaixarDocumentoMNIJob fica só para vídeo (1 job por documento)');
         $this->comment('   • Usar lotes pequenos em produção para não sobrecarregar');
 
         return 0;

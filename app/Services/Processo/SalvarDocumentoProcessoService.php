@@ -3,7 +3,6 @@
 namespace App\Services\Processo;
 
 use App\Exceptions\MNIException;
-use App\Jobs\BaixarDocumentoMNIJob;
 use App\Models\ProcessoDocumento;
 use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
 use Carbon\Carbon;
@@ -18,19 +17,39 @@ class SalvarDocumentoProcessoService
     public function execute($processo, $documentos, $login_pje = null, $senha_pje = null, bool $baixar_binarios = true)
     {
         $documentos = is_array($documentos) ? $documentos : [$documentos];
+        $paraBaixar = [];
 
         foreach ($documentos as $documento) {
 
-            $this->salvarDocumento($processo, $documento, $login_pje, $senha_pje, $baixar_binarios);
+            $paraBaixar[] = $this->salvarDocumento($processo, $documento, $login_pje, $senha_pje, $baixar_binarios);
             if (isset($documento->documentoVinculado)) {
                 $documentoVinculado = is_array($documento->documentoVinculado) ? $documento->documentoVinculado : [$documento->documentoVinculado];
                 foreach ($documentoVinculado as $documentoVinculado) {
-                    $this->salvarDocumento($processo, $documentoVinculado, $login_pje, $senha_pje, $baixar_binarios);
+                    $paraBaixar[] = $this->salvarDocumento($processo, $documentoVinculado, $login_pje, $senha_pje, $baixar_binarios);
                 }
             }
         }
+
+        if (!$baixar_binarios) {
+            return;
+        }
+
+        $paraBaixar = array_filter(
+            $paraBaixar,
+            fn (ProcessoDocumento $processoDocumento) => $processoDocumento->status != ProcessoDocumento::STATUS_BAIXADO
+        );
+
+        // Um despacho só, depois do loop: os documentos do processo (inclusive
+        // os vinculados) precisam estar juntos para sair em lotes de até T.
+        app(EnfileirarDownloadDocumentosService::class)->enfileirar($paraBaixar, $login_pje, $senha_pje);
     }
 
+    /**
+     * Persiste o documento sem enfileirar download: quem despacha é o
+     * execute(), em lote, depois de salvar todos os documentos do processo.
+     *
+     * @return ProcessoDocumento
+     */
     public function salvarDocumento($processo, $documento, $login_pje = null, $senha_pje = null, bool $baixar_binarios = true)
     {
         $processoDocumento = ProcessoDocumento::updateOrCreate(
@@ -52,9 +71,7 @@ class SalvarDocumentoProcessoService
             ]
         );
 
-        if ($baixar_binarios && $processoDocumento->status != ProcessoDocumento::STATUS_BAIXADO) {
-            BaixarDocumentoMNIJob::dispatch($processoDocumento, $login_pje, $senha_pje)->onQueue('mni-download');
-        }
+        return $processoDocumento;
     }
 
     private function extrairOutroParametro($documento, $nome)
