@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "bc-harness@beer-and-code": true
+  },
+  "extraKnownMarketplaces": {
+    "beer-and-code": {
+      "source": {
+        "source": "github",
+        "repo": "beerandcodeteam/beer-and-code-harness"
+      }
+    }
+  }
+}
