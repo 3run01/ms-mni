@@ -2,9 +2,11 @@
 
 namespace App\Services\Processo;
 
+use App\Exceptions\ConsultaMNISemSucessoException;
 use App\Exceptions\MNIException;
 use App\Models\Processo;
 use App\Models\ProcessoDocumento;
+use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
 use App\Services\MNI\Intercomunicacao\ConsultarProcessosService;
 use App\Services\MNI\NormalizarDocumentoMniService;
 use Illuminate\Support\Facades\Log;
@@ -15,6 +17,11 @@ use Illuminate\Support\Facades\Storage;
  * por execução, com uma chamada `consultarProcessos` por página e nenhuma
  * chamada por documento no caminho feliz.
  *
+ * Fora do caminho feliz (operação ausente no WSDL ou página com
+ * `sucesso = false`), recorre a `consultarProcesso` unitário para os
+ * documentos ainda não marcados. Qualquer outra exceção MNI é falha total:
+ * os ainda não marcados ficam `erro` e a exceção sobe para a fila.
+ *
  * Orquestra e persiste; o SOAP fica nas classes de operação, resolvidas pelo
  * container para que os testes troquem o MNI por mock. O `error` de cada
  * documento sai só por SalvarDocumentoProcessoService::marcarComoErro, que
@@ -23,6 +30,7 @@ use Illuminate\Support\Facades\Storage;
 class BaixarDocumentosEmLoteService
 {
     public const MOTIVO_NAO_RETORNADO = 'Documento não retornado pelo MNI na consulta em lote';
+    public const MOTIVO_NAO_RETORNADO_UNITARIO = 'Documento não retornado pelo MNI na consulta unitária';
     public const MOTIVO_VAZIO = 'Conteúdo do documento vazio na resposta do MNI';
 
     private SalvarDocumentoProcessoService $salvarDocumento;
@@ -40,10 +48,15 @@ class BaixarDocumentosEmLoteService
 
     private int $erros = 0;
 
+    private int $consultasLote = 0;
+
+    private int $consultasUnitarias = 0;
+
     /**
      * @param  array<int, int>  $processoDocumentoIds  ids de `processo_documentos`, não `id_documento`
      *
-     * @throws MNIException quando o processo não tem tribunal ativo
+     * @throws MNIException na falha total (processo sem tribunal ativo ou exceção numa
+     *                      chamada SOAP), depois de marcar `erro` nos ainda não marcados
      */
     public function executar(int $processoId, array $processoDocumentoIds, ?string $login = null, ?string $senha = null): void
     {
@@ -51,6 +64,8 @@ class BaixarDocumentosEmLoteService
         $this->naoMarcados = [];
         $this->baixados = 0;
         $this->erros = 0;
+        $this->consultasLote = 0;
+        $this->consultasUnitarias = 0;
 
         $processo = Processo::with('tribunal')->find($processoId);
 
@@ -63,10 +78,6 @@ class BaixarDocumentosEmLoteService
             return;
         }
 
-        if (!$processo->tribunal) {
-            throw new MNIException('Processo não possui tribunal associado', 500);
-        }
-
         $this->naoMarcados = $this->carregarElegiveis($processo, $processoDocumentoIds);
 
         if ($this->naoMarcados === []) {
@@ -77,17 +88,25 @@ class BaixarDocumentosEmLoteService
             return;
         }
 
-        $paginas = $this->paginar($processo, $login, $senha);
+        try {
+            // Checado depois da elegibilidade: sem elegíveis não há o que marcar
+            // e o lote termina sem exceção, mesmo sem tribunal.
+            if (!$processo->tribunal) {
+                throw new MNIException('Processo não possui tribunal associado', 500);
+            }
+
+            $this->obterConteudos($processo, $login, $senha);
+        } catch (MNIException $e) {
+            $this->encerrarComFalhaTotal($processo, $e);
+
+            throw $e;
+        }
 
         foreach ($this->naoMarcados as $documento) {
             $this->marcarErro($documento, self::MOTIVO_NAO_RETORNADO);
         }
 
-        Log::info("[Processo:{$processo->numero_processo}] lote concluído", [
-            'paginas' => $paginas,
-            'baixados' => $this->baixados,
-            'erros' => $this->erros,
-        ]);
+        Log::info("[Processo:{$processo->numero_processo}] lote concluído", $this->resumo());
     }
 
     /**
@@ -142,15 +161,55 @@ class BaixarDocumentosEmLoteService
     }
 
     /**
+     * Caminho feliz por `consultarProcessos`; fallback unitário quando o
+     * tribunal não expõe a operação ou uma página volta com `sucesso = false`.
+     *
+     * Exceções que não sejam `sucesso = false` sobem sem tratamento: são a
+     * falha total, decidida por quem chama.
+     *
+     * @throws MNIException
+     */
+    private function obterConteudos(Processo $processo, ?string $login, ?string $senha): void
+    {
+        $consultarProcessos = app(ConsultarProcessosService::class);
+
+        if (!$consultarProcessos->operacaoDisponivel($processo->tribunal)) {
+            // Em warning para medir quantos tribunais ficam fora do lote.
+            Log::warning("[Processo:{$processo->numero_processo}] lote: tribunal sem consultarProcessos no WSDL; usando consulta unitária", [
+                'tribunal_id' => $processo->tribunal->id,
+                'documentos' => count($this->naoMarcados),
+            ]);
+
+            $this->consultarUmAUm($processo, $login, $senha);
+
+            return;
+        }
+
+        try {
+            $this->paginar($consultarProcessos, $processo, $login, $senha);
+        } catch (ConsultaMNISemSucessoException $e) {
+            // O tribunal respondeu, só não pelo lote: os já marcados nas
+            // páginas anteriores ficam como estão e o resto vai um a um.
+            Log::warning("[Processo:{$processo->numero_processo}] lote: consultarProcessos sem sucesso; usando consulta unitária", [
+                'pagina' => $this->consultasLote,
+                'mensagem' => $e->getError(),
+                'documentos' => count($this->naoMarcados),
+            ]);
+
+            $this->consultarUmAUm($processo, $login, $senha);
+        }
+    }
+
+    /**
      * Lê `consultarProcessos` da página 1 até P e para assim que todos os
      * elegíveis voltaram ou uma página vem vazia. `totalRegistros` não é
      * usado: a amostra sugere que ele conta processos, não documentos.
      *
-     * @return int páginas lidas
+     * @throws ConsultaMNISemSucessoException quando uma página volta com `sucesso = false`
+     * @throws MNIException nas demais falhas da chamada
      */
-    private function paginar(Processo $processo, ?string $login, ?string $senha): int
+    private function paginar(ConsultarProcessosService $consultarProcessos, Processo $processo, ?string $login, ?string $senha): void
     {
-        $consultarProcessos = app(ConsultarProcessosService::class);
         $parametros = app(ParametrosDownloadEmLote::class);
         $maxPaginas = $parametros->maxPaginas();
         $tamanhoPagina = $parametros->tamanhoPagina();
@@ -161,9 +220,8 @@ class BaixarDocumentosEmLoteService
             array_values($this->naoMarcados)
         );
 
-        $paginasLidas = 0;
-
         for ($pagina = 1; $pagina <= $maxPaginas && $this->naoMarcados !== []; $pagina++) {
+            $this->consultasLote++;
             $documentosPagina = $consultarProcessos->consultarPagina(
                 $processo->tribunal,
                 (string) $processo->numero_processo,
@@ -173,7 +231,6 @@ class BaixarDocumentosEmLoteService
                 $login,
                 $senha,
             );
-            $paginasLidas++;
 
             if ($documentosPagina === []) {
                 break;
@@ -197,8 +254,83 @@ class BaixarDocumentosEmLoteService
 
             unset($documentosPagina);
         }
+    }
 
-        return $paginasLidas;
+    /**
+     * Fallback unitário (`consultarProcesso`, um documento por chamada) para
+     * os ainda não marcados, na ordem do lote.
+     *
+     * `sucesso = false` numa chamada é falha só daquele documento; qualquer
+     * outra exceção sobe e encerra as consultas do lote, inclusive as dos
+     * documentos ainda não pedidos.
+     *
+     * @throws MNIException
+     */
+    private function consultarUmAUm(Processo $processo, ?string $login, ?string $senha): void
+    {
+        $consultarDocumento = app(ConsultarDocumentoService::class);
+
+        // O foreach percorre uma cópia: marcar tira o documento de naoMarcados.
+        foreach ($this->naoMarcados as $documento) {
+            $this->consultasUnitarias++;
+
+            try {
+                $documentoMni = $consultarDocumento->buscar(
+                    $processo->tribunal,
+                    (string) $processo->numero_processo,
+                    (string) $documento->id_documento,
+                    $login,
+                    $senha,
+                );
+            } catch (ConsultaMNISemSucessoException $e) {
+                $this->marcarErro($documento, $e->getError());
+
+                continue;
+            }
+
+            if ($documentoMni === null) {
+                $this->marcarErro($documento, self::MOTIVO_NAO_RETORNADO_UNITARIO);
+
+                continue;
+            }
+
+            $this->tratarDocumento($documento, $documentoMni);
+            unset($documentoMni);
+        }
+    }
+
+    /**
+     * Falha total: `erro` só nos ainda não marcados nesta execução. Quem já
+     * ficou `baixado` ou `erro` mantém o que recebeu, sem outro +1 nem outro
+     * log. Sem `Log::error` do lote: o RNF-03 conta 1 por documento.
+     */
+    private function encerrarComFalhaTotal(Processo $processo, MNIException $e): void
+    {
+        $motivo = $e->getError();
+        $atingidos = count($this->naoMarcados);
+
+        foreach ($this->naoMarcados as $documento) {
+            $this->marcarErro($documento, $motivo);
+        }
+
+        Log::warning("[Processo:{$processo->numero_processo}] lote encerrado por falha total do MNI", [
+            'motivo' => $motivo,
+            'marcados_por_falha_total' => $atingidos,
+            ...$this->resumo(),
+        ]);
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function resumo(): array
+    {
+        return [
+            'consultas_lote' => $this->consultasLote,
+            'consultas_unitarias' => $this->consultasUnitarias,
+            'baixados' => $this->baixados,
+            'erros' => $this->erros,
+        ];
     }
 
     /**

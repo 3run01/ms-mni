@@ -406,14 +406,15 @@ it('registra warning e termina sem consultar o MNI quando o processo nao existe'
     Log::shouldNotHaveReceived('error');
 });
 
-it('lanca MNIException quando o processo nao tem tribunal ativo', function (array $processo, array $tribunal) {
+it('trata processo sem tribunal ativo como falha total e lanca MNIException', function (array $processo, array $tribunal) {
     [$processoCriado, $documentos] = criarDocumentosLote(1, $processo, $tribunal);
     $this->consultarProcessos->shouldNotReceive('consultarPagina');
 
     expect(fn () => executarLoteDownload($processoCriado, $documentos))
         ->toThrow(MNIException::class);
 
-    expect($documentos[0]->fresh()->status)->toBe(ProcessoDocumento::STATUS_PENDENTE);
+    expectErroNoLote($documentos[0], 0);
+    errosLogadosPara($documentos[0], 'tribunal');
 })->with([
     'tribunal inexistente' => [['tribunal_id' => 999999], []],
     'tribunal inativo' => [[], ['ativo' => false]],
