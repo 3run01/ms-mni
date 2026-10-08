@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\DocumentoController;
 use App\Jobs\ConsultarDocumentosProcessoMNIJob;
 use App\Models\Processo;
 use App\Models\ProcessoDocumento;
+use App\Models\Tribunal;
+use App\Services\Processo\ProcessoService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -291,4 +293,26 @@ it('visualizar sem credenciais usa o par padrao do .env', function () {
         ->getJson("/api/documento/visualizar?tribunal_id=999999&numero_processo={$numero}&id_documento=930010")
         ->assertOk()
         ->assertJsonPath('documento.link', "https://s3.fake/documentos-processos/{$numero}/930010.pdf");
+});
+
+it('visualizar documento ausente no banco consulta o processo pelo ProcessoService injetado com o par da requisição', function () {
+    $tribunal = Tribunal::factory()->create();
+    $numero = 'VISAUSENTE' . getmypid();
+
+    $this->mock(ProcessoService::class, function ($mock) use ($tribunal, $numero) {
+        $mock->shouldReceive('consultarNumero')
+            ->once()
+            ->withArgs(fn ($tribunalRecebido, $numeroRecebido, $login, $senha) => $tribunalRecebido instanceof Tribunal
+                && $tribunalRecebido->id === $tribunal->id
+                && $numeroRecebido === $numero
+                && $login === 'u-pje'
+                && $senha === 's-pje')
+            ->andReturnNull();
+    });
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson("/api/documento/visualizar?tribunal_id={$tribunal->id}&numero_processo={$numero}&id_documento=930020&login_pje=u-pje&senha_pje=s-pje")
+        ->assertStatus(500)
+        ->assertExactJson(['message' => 'Documento não encontrado'])
+        ->assertJsonMissingPath('codigo');
 });

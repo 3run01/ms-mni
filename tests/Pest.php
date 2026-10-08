@@ -122,3 +122,35 @@ function documentoMniFake(\App\Models\ProcessoDocumento|int|string $documento, a
             : "conteudo-binario-{$id}",
     ], $atributos);
 }
+
+/**
+ * Troca o IntegracaoBase do container por um mock que não toca a rede.
+ *
+ * Cada makeSoapRequest fica em `->requisicoes` (`operacao`, `parametros`) e
+ * é delegado ao `$responder($operacao, $parametros)`, que devolve o retorno
+ * do MNI ou lança (ex.: SoapFault). A URL de cada criação fica em `->urls`.
+ * Um único binding atende ConsultarProcessoService e ConsultarDocumentoService:
+ * a consulta de documento é a que tem a chave `documento` em `parametros`.
+ */
+function simularIntegracaoMni(Closure $responder): stdClass
+{
+    $registro = new stdClass();
+    $registro->urls = [];
+    $registro->requisicoes = [];
+
+    app()->bind(\App\Services\IntegracaoBase::class, function ($app, $params) use ($registro, $responder) {
+        $registro->urls[] = $params['url'] ?? null;
+
+        $integracao = Mockery::mock(\App\Services\IntegracaoBase::class);
+        $integracao->shouldReceive('makeSoapRequest')
+            ->andReturnUsing(function (string $operacao, array $parametros) use ($registro, $responder) {
+                $registro->requisicoes[] = ['operacao' => $operacao, 'parametros' => $parametros];
+
+                return $responder($operacao, $parametros);
+            });
+
+        return $integracao;
+    });
+
+    return $registro;
+}

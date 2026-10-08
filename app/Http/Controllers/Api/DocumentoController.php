@@ -169,8 +169,7 @@ class DocumentoController extends Controller
 
 
         if (empty($documento)) {
-            $processoService = new ProcessoService();
-            $processoService->consultarNumero($tribunal, $numero_processo, $login_pje, $senha_pje);
+            $this->processoService->consultarNumero($tribunal, $numero_processo, $login_pje, $senha_pje);
             $documento = ProcessoDocumento::where('id_documento', $id_documento)
                 ->whereHas('processo', function ($query) use ($numero_processo) {
                     $query->where('numero_processo', $numero_processo);

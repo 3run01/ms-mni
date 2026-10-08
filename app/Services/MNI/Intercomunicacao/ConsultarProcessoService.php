@@ -37,7 +37,8 @@ class ConsultarProcessoService
                 'incluirDocumentos'  => $incluir_documentos,
             ];
 
-            $integracao = new IntegracaoBase($tribunal->url_webservice_mni_consultar_processo);
+            // Resolvida pelo container para que os testes troquem o cliente SOAP por binding.
+            $integracao = app()->makeWith(IntegracaoBase::class, ['url' => $tribunal->url_webservice_mni_consultar_processo]);
 
             $retorno = $integracao->makeSoapRequest('consultarProcesso', $params);
 
