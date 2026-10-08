@@ -1,7 +1,9 @@
 <?php
 
 use App\Exceptions\ConsultaMNISemSucessoException;
+use App\Exceptions\CredencialPjeRecusadaException;
 use App\Exceptions\MNIException;
+use App\Exceptions\ProcessoNaoEncontradoNoTribunalException;
 use App\Models\Tribunal;
 use App\Services\IntegracaoBase;
 use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
@@ -10,6 +12,9 @@ use Illuminate\Support\Facades\Crypt;
 const URL_MNI_CONSULTAR_DOCUMENTO = 'https://mni.tribunal.exemplo/intercomunicacao?wsdl';
 const URL_CONSULTAR_PROCESSO_CONSULTAR_DOCUMENTO = 'https://consulta.tribunal.exemplo/intercomunicacao?wsdl';
 const MENSAGEM_BLOQUEIO_CONSULTAR_DOCUMENTO = 'Visualização do documento bloqueada enquanto não houver ciência de seus destinatários';
+const LOGIN_RECUSADO_CONSULTAR_DOCUMENTO = 'Erro ao realizar login via MNI. exception invoking: loginFailed';
+const FAULT_LOGIN_RECUSADO_CONSULTAR_DOCUMENTO = 'org.apache.cxf.interceptor.Fault: exception invoking: loginFailed';
+const PROCESSO_NAO_ENCONTRADO_CONSULTAR_DOCUMENTO = 'Processo de número 99999901120268030001 não encontrado!';
 
 function tribunalConsultarDocumento(array $atributos = []): Tribunal
 {
@@ -61,6 +66,29 @@ function simularIntegracaoConsultarDocumento(object $chamadas, Closure $responde
 
         return $integracao;
     });
+}
+
+/**
+ * O tribunal falha do jeito pedido: `sucesso = false` com a mensagem, ou
+ * SoapFault com o texto (o fault CXF do PJe chega assim).
+ */
+function responderFalhaConsultarDocumento(string $forma, string $texto): Closure
+{
+    return match ($forma) {
+        'sucesso false' => fn () => (object) ['sucesso' => false, 'mensagem' => $texto],
+        'SoapFault' => fn () => throw new SoapFault('Server', $texto),
+    };
+}
+
+function falhaConsultarDocumento(Closure $consulta): ?Throwable
+{
+    try {
+        $consulta();
+    } catch (Throwable $e) {
+        return $e;
+    }
+
+    return null;
 }
 
 beforeEach(function () {
@@ -361,3 +389,86 @@ it('execute transforma SoapFault em MNIException', function () {
         ->toThrow(fn (MNIException $e) => expect($e->getError())->toBe('Could not connect to host')
             ->and($e->getCode())->toBe(500));
 });
+
+// execute (classificação da falha) ----------------------------------------------
+
+it('execute lança CredencialPjeRecusadaException 500 quando o tribunal recusa o par informado', function (string $forma, string $texto) {
+    simularIntegracaoConsultarDocumento($this->chamadas, responderFalhaConsultarDocumento($forma, $texto));
+
+    $capturada = falhaConsultarDocumento(fn () => (new ConsultarDocumentoService())
+        ->execute(tribunalConsultarDocumento(), '0000001-02.2024.8.26.0001', 4001, '{LOGIN}', '{SENHA}'));
+
+    expect($capturada)->toBeInstanceOf(CredencialPjeRecusadaException::class)
+        ->and($capturada->getError())->toBe('Erro ao realizar login via MNI. Verifique suas credenciais.')
+        ->and($capturada->getCode())->toBe(500)
+        ->and($this->chamadas->requisicoes)->toHaveCount(1);
+})->with([
+    'sucesso false' => ['sucesso false', LOGIN_RECUSADO_CONSULTAR_DOCUMENTO],
+    'fault CXF' => ['SoapFault', FAULT_LOGIN_RECUSADO_CONSULTAR_DOCUMENTO],
+]);
+
+// Sem o par a chamada usa a credencial do tribunal: a recusa não é do
+// consultante e segue como falha comum.
+it('execute lança MNIException comum quando o tribunal recusa a credencial do tribunal', function (string $forma, string $texto) {
+    simularIntegracaoConsultarDocumento($this->chamadas, responderFalhaConsultarDocumento($forma, $texto));
+
+    $capturada = falhaConsultarDocumento(fn () => (new ConsultarDocumentoService())
+        ->execute(tribunalConsultarDocumento(), '0000001-02.2024.8.26.0001', 4001));
+
+    expect(get_class($capturada))->toBe(MNIException::class)
+        ->and($capturada->getError())->toBe('Erro ao realizar login via MNI. Verifique suas credenciais.')
+        ->and($capturada->getCode())->toBe(500)
+        ->and($this->chamadas->requisicoes)->toHaveCount(1)
+        ->and($this->chamadas->requisicoes[0]['parametros']['idConsultante'])->toBe('login-do-tribunal');
+})->with([
+    'sucesso false' => ['sucesso false', LOGIN_RECUSADO_CONSULTAR_DOCUMENTO],
+    'fault CXF' => ['SoapFault', FAULT_LOGIN_RECUSADO_CONSULTAR_DOCUMENTO],
+]);
+
+it('execute lança ProcessoNaoEncontradoNoTribunalException 500 para o texto capturado do tribunal', function (?string $login, ?string $senha) {
+    simularIntegracaoConsultarDocumento($this->chamadas, responderFalhaConsultarDocumento('sucesso false', PROCESSO_NAO_ENCONTRADO_CONSULTAR_DOCUMENTO));
+
+    $capturada = falhaConsultarDocumento(fn () => (new ConsultarDocumentoService())
+        ->execute(tribunalConsultarDocumento(), '0000001-02.2024.8.26.0001', 4001, $login, $senha));
+
+    expect($capturada)->toBeInstanceOf(ProcessoNaoEncontradoNoTribunalException::class)
+        ->and($capturada->getError())->toBe(PROCESSO_NAO_ENCONTRADO_CONSULTAR_DOCUMENTO)
+        ->and($capturada->getCode())->toBe(500)
+        ->and($this->chamadas->requisicoes)->toHaveCount(1);
+})->with([
+    'com o par informado' => ['{LOGIN}', '{SENHA}'],
+    'com a credencial do tribunal' => [null, null],
+]);
+
+it('execute lança MNIException comum para falha fora dos padrões classificados', function (string $forma, string $texto) {
+    simularIntegracaoConsultarDocumento($this->chamadas, responderFalhaConsultarDocumento($forma, $texto));
+
+    $capturada = falhaConsultarDocumento(fn () => (new ConsultarDocumentoService())
+        ->execute(tribunalConsultarDocumento(), '0000001-02.2024.8.26.0001', 4001, '{LOGIN}', '{SENHA}'));
+
+    expect(get_class($capturada))->toBe(MNIException::class)
+        ->and($capturada->getCode())->toBe(500)
+        ->and($this->chamadas->requisicoes)->toHaveCount(1);
+})->with([
+    'recusa sem loginfailed' => ['sucesso false', 'Erro ao realizar login via MNI.'],
+    'sem permissão de acesso' => ['sucesso false', 'Processo não encontrado ou sem permissão de acesso'],
+    'sem exclamação' => ['sucesso false', 'Processo de número 99999901120268030001 não encontrado'],
+    'com prefixo' => ['sucesso false', 'Erro: Processo de número 99999901120268030001 não encontrado!'],
+    'SoapFault com o texto de não encontrado' => ['SoapFault', PROCESSO_NAO_ENCONTRADO_CONSULTAR_DOCUMENTO],
+]);
+
+// buscar (lote) não classifica: o fallback unitário depende de
+// ConsultaMNISemSucessoException para todo `sucesso = false`.
+it('buscar continua lançando ConsultaMNISemSucessoException para os textos classificados por execute', function (string $texto) {
+    simularIntegracaoConsultarDocumento($this->chamadas, responderFalhaConsultarDocumento('sucesso false', $texto));
+
+    $capturada = falhaConsultarDocumento(fn () => (new ConsultarDocumentoService())
+        ->buscar(tribunalConsultarDocumento(), '0000001-02.2024.8.26.0001', '4001', '{LOGIN}', '{SENHA}'));
+
+    expect(get_class($capturada))->toBe(ConsultaMNISemSucessoException::class)
+        ->and($capturada->getCode())->toBe(500)
+        ->and($this->chamadas->requisicoes)->toHaveCount(1);
+})->with([
+    'loginFailed' => LOGIN_RECUSADO_CONSULTAR_DOCUMENTO,
+    'processo não encontrado' => PROCESSO_NAO_ENCONTRADO_CONSULTAR_DOCUMENTO,
+]);
