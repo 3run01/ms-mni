@@ -2,7 +2,9 @@
 
 namespace App\Services\Processo;
 
+use App\Exceptions\CredencialPjeRecusadaException;
 use App\Exceptions\MNIException;
+use App\Exceptions\ProcessoNaoEncontradoNoTribunalException;
 use App\Models\ProcessoDocumento;
 use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
 use Carbon\Carbon;
@@ -108,7 +110,15 @@ class SalvarDocumentoProcessoService
         // Verifica se o documento já está baixado e existe no S3
         if ($documento->status == ProcessoDocumento::STATUS_BAIXADO && Storage::disk('s3')->exists($documento->path)) {
             if ($documento->mimetype == 'text/html' && !$documento->temConteudoHtml()) {
-                $this->downloadHTML($documento);
+                // A reconsulta usa a credencial do tribunal, não o par da
+                // requisição: a recusa ou o "não encontrado" dela não pode
+                // chegar ao cliente como código estável. Mesma mensagem, sem
+                // a exceção classificada na cadeia de previous.
+                try {
+                    $this->downloadHTML($documento);
+                } catch (\Exception $e) {
+                    throw new \Exception($e->getMessage());
+                }
             }
 
             return ProcessoDocumento::find($documento->id);
@@ -229,7 +239,7 @@ class SalvarDocumentoProcessoService
 
             return $this->salvarConteudoHtml($documento, $documentoMNI);
         } catch (\Exception $e) {
-            throw new \Exception('Erro ao processar documento HTML: ' . $e->getMessage());
+            throw new \Exception('Erro ao processar documento HTML: ' . $e->getMessage(), 0, $e);
         }
     }
 
@@ -318,7 +328,7 @@ class SalvarDocumentoProcessoService
 
             return $this->salvarConteudoPdf($documento, $documentoMNI);
         } catch (\Exception $e) {
-            throw new \Exception('Erro ao processar documento PDF: ' . $e->getMessage());
+            throw new \Exception('Erro ao processar documento PDF: ' . $e->getMessage(), 0, $e);
         }
     }
 
@@ -350,7 +360,7 @@ class SalvarDocumentoProcessoService
 
             return $this->salvarConteudoOutros($documento, $documentoMNI);
         } catch (\Exception $e) {
-            throw new \Exception('Erro ao processar documento: ' . $e->getMessage());
+            throw new \Exception('Erro ao processar documento: ' . $e->getMessage(), 0, $e);
         }
     }
 
@@ -431,6 +441,15 @@ class SalvarDocumentoProcessoService
                 $login_pje,
                 $senha_pje
             );
+        } catch (CredencialPjeRecusadaException|ProcessoNaoEncontradoNoTribunalException $e) {
+            Log::error('Erro MNI ao consultar documento', [
+                'documento_id' => $documento->id_documento ?? 'N/A',
+                'error' => $e->getError(),
+                'code' => $e->getCode()
+            ]);
+            // Sem re-embrulhar: o catch de MNIException abaixo apagaria o tipo
+            // que a camada HTTP usa para responder com código estável.
+            throw $e;
         } catch (MNIException $e) {
             Log::error('Erro MNI ao consultar documento', [
                 'documento_id' => $documento->id_documento ?? 'N/A',
@@ -716,7 +735,7 @@ class SalvarDocumentoProcessoService
 
             return $this->salvarConteudoAudio($documento, $documentoMNI);
         } catch (\Exception $e) {
-            throw new \Exception('Erro ao processar documento de áudio: ' . $e->getMessage());
+            throw new \Exception('Erro ao processar documento de áudio: ' . $e->getMessage(), 0, $e);
         }
     }
 

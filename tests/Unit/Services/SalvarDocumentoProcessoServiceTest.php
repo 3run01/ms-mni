@@ -1,5 +1,8 @@
 <?php
 
+use App\Exceptions\CredencialPjeRecusadaException;
+use App\Exceptions\MNIException;
+use App\Exceptions\ProcessoNaoEncontradoNoTribunalException;
 use App\Jobs\BaixarDocumentoMNIJob;
 use App\Jobs\BaixarDocumentosMNIEmLoteJob;
 use App\Models\Processo;
@@ -422,3 +425,133 @@ it('marcarComoErro conta a partir de zero quando tentativas_download esta nulo e
 
     expect($documento->refresh()->tentativas_download)->toBe(1);
 });
+
+// Sinal do tribunal no download -------------------------------------------------
+
+const LOGIN_RECUSADO_SALVAR_DOCUMENTO = 'Erro ao realizar login via MNI. exception invoking: loginFailed';
+const LOGIN_PADRONIZADO_SALVAR_DOCUMENTO = 'Erro ao realizar login via MNI. Verifique suas credenciais.';
+const PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO = 'Processo de número 99999901120268030001 não encontrado!';
+
+function falhaSalvarDocumento(Closure $acao): ?Throwable
+{
+    try {
+        $acao();
+    } catch (Throwable $e) {
+        return $e;
+    }
+
+    return null;
+}
+
+// MNIException não preenche getMessage(), então a mensagem dos wrappers fica
+// só com o prefixo, como no commit base b9f0028.
+it('download* preservam a exceção classificada como previous sem mudar a mensagem', function (string $metodo, string $mimetype, string $mensagem, string $classe, string $texto) {
+    $documento = criarDocumentoParaSalvarConteudo($mimetype, 940014);
+    $classificada = new $classe($texto, 500);
+
+    $service = Mockery::mock(SalvarDocumentoProcessoService::class)->makePartial();
+    $service->shouldReceive('consultarDocumento')
+        ->once()
+        ->with($documento, 'login-pje', 'senha-pje')
+        ->andThrow($classificada);
+
+    $capturada = falhaSalvarDocumento(fn () => $service->{$metodo}($documento, 'login-pje', 'senha-pje'));
+
+    expect(get_class($capturada))->toBe(Exception::class)
+        ->and($capturada->getMessage())->toBe($mensagem)
+        ->and($capturada->getCode())->toBe(0)
+        ->and($capturada->getPrevious())->toBe($classificada);
+})->with([
+    'downloadHTML' => ['downloadHTML', 'text/html', 'Erro ao processar documento HTML: '],
+    'downloadPDF' => ['downloadPDF', 'application/pdf', 'Erro ao processar documento PDF: '],
+    'downloadAudio' => ['downloadAudio', 'audio/mpeg', 'Erro ao processar documento de áudio: '],
+    'downloadOutros' => ['downloadOutros', 'application/msword', 'Erro ao processar documento: '],
+])->with([
+    'credencial recusada' => [CredencialPjeRecusadaException::class, LOGIN_RECUSADO_SALVAR_DOCUMENTO],
+    'processo não encontrado' => [ProcessoNaoEncontradoNoTribunalException::class, PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO],
+]);
+
+it('consultarDocumento relança a exceção classificada sem re-embrulhar', function (?string $login, ?string $senha, string $texto, string $classe, string $erro) {
+    Log::spy();
+    [, $documentos] = criarDocumentosLote();
+    $documento = $documentos->first();
+    $registro = simularIntegracaoMni(fn () => (object) ['sucesso' => false, 'mensagem' => $texto]);
+
+    $capturada = falhaSalvarDocumento(fn () => (new SalvarDocumentoProcessoService())
+        ->consultarDocumento($documento, $login, $senha));
+
+    expect(get_class($capturada))->toBe($classe)
+        ->and($capturada->getError())->toBe($erro)
+        ->and($capturada->getCode())->toBe(500)
+        ->and($registro->requisicoes)->toHaveCount(1)
+        ->and($registro->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento);
+
+    Log::shouldHaveReceived('error')->once();
+    Log::shouldHaveReceived('error')->with('Erro MNI ao consultar documento', [
+        'documento_id' => $documento->id_documento,
+        'error' => $erro,
+        'code' => 500,
+    ]);
+})->with([
+    'processo não encontrado com o par informado' => ['{LOGIN}', '{SENHA}', PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO, ProcessoNaoEncontradoNoTribunalException::class, PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO],
+    'processo não encontrado com a credencial do tribunal' => [null, null, PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO, ProcessoNaoEncontradoNoTribunalException::class, PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO],
+    'credencial recusada com o par informado' => ['{LOGIN}', '{SENHA}', LOGIN_RECUSADO_SALVAR_DOCUMENTO, CredencialPjeRecusadaException::class, LOGIN_PADRONIZADO_SALVAR_DOCUMENTO],
+]);
+
+it('consultarDocumento continua re-embrulhando a MNIException comum', function () {
+    [, $documentos] = criarDocumentosLote();
+    simularIntegracaoMni(fn () => (object) ['sucesso' => false, 'mensagem' => 'MNI indisponível']);
+
+    $capturada = falhaSalvarDocumento(fn () => (new SalvarDocumentoProcessoService())
+        ->consultarDocumento($documentos->first(), '{LOGIN}', '{SENHA}'));
+
+    expect(get_class($capturada))->toBe(MNIException::class)
+        ->and($capturada->getError())->toBe('MNI indisponível')
+        ->and($capturada->getCode())->toBe(500);
+});
+
+it('baixarDocumento de HTML legado mantém a mensagem e não leva a exceção classificada na cadeia', function (string $classe, string $texto) {
+    Storage::fake('s3');
+    $documento = criarDocumentoHtml([
+        'id_documento' => 920008,
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => 'documentos-processos/x/920008.pdf',
+    ]);
+    Storage::disk('s3')->put('documentos-processos/x/920008.pdf', 'pdf-fake');
+    $falha = new Exception('Erro ao processar documento HTML: ', 0, new $classe($texto, 500));
+
+    $service = Mockery::mock(SalvarDocumentoProcessoService::class)->makePartial();
+    $service->shouldReceive('downloadHTML')->once()->with($documento)->andThrow($falha);
+
+    $capturada = falhaSalvarDocumento(fn () => $service->baixarDocumento($documento, 'login-pje', 'senha-pje'));
+
+    expect(get_class($capturada))->toBe(Exception::class)
+        ->and($capturada->getMessage())->toBe('Erro ao processar documento HTML: ')
+        ->and($capturada->getPrevious())->toBeNull();
+})->with([
+    'credencial recusada' => [CredencialPjeRecusadaException::class, LOGIN_RECUSADO_SALVAR_DOCUMENTO],
+    'processo não encontrado' => [ProcessoNaoEncontradoNoTribunalException::class, PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO],
+]);
+
+it('baixarDocumento de HTML legado reconsulta com a credencial do tribunal e corta a cadeia', function (string $texto) {
+    Storage::fake('s3');
+    [, $documentos] = criarDocumentosLote([[
+        'mimetype' => 'text/html',
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => 'documentos-processos/x/legado.pdf',
+    ]]);
+    Storage::disk('s3')->put('documentos-processos/x/legado.pdf', 'pdf-fake');
+    $registro = simularIntegracaoMni(fn () => (object) ['sucesso' => false, 'mensagem' => $texto]);
+
+    $capturada = falhaSalvarDocumento(fn () => (new SalvarDocumentoProcessoService())
+        ->baixarDocumento($documentos->first(), 'login-pje', 'senha-pje'));
+
+    expect(get_class($capturada))->toBe(Exception::class)
+        ->and($capturada->getMessage())->toBe('Erro ao processar documento HTML: ')
+        ->and($capturada->getPrevious())->toBeNull()
+        ->and($registro->requisicoes)->toHaveCount(1)
+        ->and($registro->requisicoes[0]['parametros']['idConsultante'])->toBe('login-do-tribunal');
+})->with([
+    'loginFailed' => LOGIN_RECUSADO_SALVAR_DOCUMENTO,
+    'processo não encontrado' => PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO,
+]);
