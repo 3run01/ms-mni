@@ -120,6 +120,28 @@ paths:
               schema: { $ref: '#/components/schemas/Processo' }
         '400': { $ref: '#/components/responses/Erro400' }
         '401': { $ref: '#/components/responses/Erro401' }
+        '403':
+          x-dependencia: DEP-01
+          description: O tribunal recusou o par `login_pje`/`senha_pje`.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/ErroComCodigo' }
+                  - properties:
+                      codigo: { const: credencial_pje_recusada }
+              example: { codigo: credencial_pje_recusada, message: "Credencial PJe recusada pelo tribunal" }
+        '404':
+          x-dependencia: DEP-01
+          description: O processo não existe no tribunal.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/ErroComCodigo' }
+                  - properties:
+                      codigo: { const: processo_nao_encontrado }
+              example: { codigo: processo_nao_encontrado, message: "Processo não encontrado no tribunal" }
         '422': { $ref: '#/components/responses/Erro422' }
         '500': { $ref: '#/components/responses/Erro500' }
   /processo/dados-basicos:
@@ -284,12 +306,42 @@ paths:
                   message: { type: string, example: "Documento 12345 consultado com sucesso" }
                   documento: { $ref: '#/components/schemas/Documento' }
         '401': { $ref: '#/components/responses/Erro401' }
-        '404':
-          description: Documento não obtido após as tentativas.
+        '403':
+          x-dependencia: DEP-01
+          description: O tribunal recusou o par `login_pje`/`senha_pje`.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ErroMensagem' }
-              example: { message: "Não foi possível obter o documento 12345 do processo ... após 3 tentativas" }
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/ErroComCodigo' }
+                  - properties:
+                      codigo: { const: credencial_pje_recusada }
+              example: { codigo: credencial_pje_recusada, message: "Credencial PJe recusada pelo tribunal" }
+        '404':
+          x-dependencia: DEP-01
+          description: |
+            Dois casos, distinguidos pelo campo `codigo`:
+            - `codigo` = `processo_nao_encontrado` (DEP-01): o processo não existe
+              no tribunal;
+            - sem `codigo`: documento não obtido após as tentativas.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - { $ref: '#/components/schemas/ErroComCodigo' }
+                      - properties:
+                          codigo: { const: processo_nao_encontrado }
+                  - allOf:
+                      - { $ref: '#/components/schemas/ErroMensagem' }
+                      - not: { required: [codigo] }
+              examples:
+                processo_nao_encontrado:
+                  summary: Processo inexistente no tribunal (DEP-01)
+                  value: { codigo: processo_nao_encontrado, message: "Processo não encontrado no tribunal" }
+                documento_nao_obtido:
+                  summary: Documento não obtido após as tentativas
+                  value: { message: "Não foi possível obter o documento 12345 do processo ... após 3 tentativas" }
         '422': { $ref: '#/components/responses/Erro422' }
         '500':
           description: Erro interno.
@@ -721,6 +773,19 @@ components:
           type: string
           example: "Token inválido ou não fornecido"
       required: [message]
+    ErroComCodigo:
+      type: object
+      x-dependencia: DEP-01
+      description: |
+        Erro com código estável para o cliente decidir sem ler o texto:
+        - `credencial_pje_recusada` (`403`): o tribunal recusou o par
+          `login_pje`/`senha_pje`;
+        - `processo_nao_encontrado` (`404`): o processo não existe no tribunal.
+        `message` é só informativo e nunca contém a credencial.
+      properties:
+        codigo: { type: string, enum: [credencial_pje_recusada, processo_nao_encontrado] }
+        message: { type: string, example: "Credencial PJe recusada pelo tribunal" }
+      required: [codigo, message]
     MonitoramentoCriar:
       type: object
       required: [numero_processo, tribunal_id, intervalo_horas, callback_url, callback_token]

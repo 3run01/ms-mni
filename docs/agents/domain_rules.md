@@ -124,6 +124,8 @@ Update matrix (`aplicarAtualizacao`, shared by PATCH and repeated POST; absent f
 |---|---|
 | `erro ao realizar login via mni`, `loginfailed` | `Erro ao realizar login via MNI. Verifique suas credenciais.` |
 
+- `loginfailed` also decides the 403 `credencial_pje_recusada` on `GET /processo/visualizar` and `GET /documento/visualizar` (see "Erros com código estável (DEP-01)"). That check lives outside `REGRAS`, in `ClassificarFalhaMniService::credencialRecusada`, and runs on the raw text before this normalization; `erro ao realizar login via mni` alone does not trigger the 403.
+
 Extend: append `['trechos' => [...lowercase...], 'mensagem' => '...']` to `REGRAS`.
 
 ### Processo persistence and caching
@@ -164,6 +166,31 @@ Extend: append `['trechos' => [...lowercase...], 'mensagem' => '...']` to `REGRA
 - `GET /documento/visualizar`: missing documento → full `consultarNumero` then retry lookup; still missing → `MNIException('Documento não encontrado', 404)`.
 - Up to 3 attempts to obtain a 60-min presigned S3 `link`; none → 404 `Não foi possível obter o documento {id} do processo {numero} após 3 tentativas`.
 - `conteudo_html` attached only to the response (from DB column or S3 `path_html`), never persisted; missing HTML object for `text/html` → one self-heal `downloadHTML`.
+- Client pair refused (`loginfailed`) → 403 `credencial_pje_recusada`; `Processo de número <dígitos> não encontrado!` → 404 `processo_nao_encontrado`. Both stop the 3-attempt loop. Rules and exclusions in the next section.
+
+### Erros com código estável (DEP-01)
+
+Scope: `GET /processo/visualizar` and `GET /documento/visualizar` only. Status decided in `app/Http` (`App\Http\Responses\ErroComCodigo`); services only throw typed exceptions.
+
+| Raw MNI signal | Condition | Response |
+|---|---|---|
+| `loginfailed` (case-insensitive) in `sucesso = false` `mensagem` or in SoapFault/exception text | call used the pair sent by the client | 403 `{"codigo": "credencial_pje_recusada", "message": "Credencial PJe recusada pelo tribunal"}` |
+| `sucesso = false` with `mensagem` matching `^Processo de número \d+ não encontrado!$` (whole text) | any credential | 404 `{"codigo": "processo_nao_encontrado", "message": "Processo não encontrado no tribunal"}` |
+
+- Detection on the raw text, before `MNIException` normalization: `ClassificarFalhaMniService` (`credencialRecusada`, `processoNaoEncontrado`, `PADRAO_PROCESSO_NAO_ENCONTRADO`).
+- `Intercomunicacao\ConsultarProcessoService::execute` and `ConsultarDocumentoService::execute` throw `CredencialPjeRecusadaException` / `ProcessoNaoEncontradoNoTribunalException` (extend `MNIException`; `getCode()` 500; `getError()` normalized as before). Recusa is classified only when `login_pje` and `senha_pje` are both non-null.
+- Client pair: `InjectCredenciaisPjePadrao` sets request attribute `credenciais_pje_do_cliente` (`ATRIBUTO_PAR_DO_CLIENTE`) to `true` only when the request brings both `login_pje` and `senha_pje`; `false` when it injects the env pair or nulls them.
+- `ErroComCodigo::classificar($e, $parDoCliente)` walks `$e` and `getPrevious()`: "não encontrado" always maps; recusa only with `$parDoCliente`. `ErroComCodigo::resposta()` uses fixed literals, never the tribunal text.
+- Covered MNI calls: sync `consultarNumero` (processo/visualizar DB miss; documento/visualizar documento missing) and the binary download of `/documento/visualizar` (`downloadPDF`, `downloadHTML`, `downloadAudio`, `downloadOutros`). Download wrappers keep their message and chain the original as `previous`; `consultarDocumento` rethrows typed exceptions unwrapped; `DocumentoController::getDocumento` rethrows the classified one. No extra SOAP call; no retries after a classified failure.
+- Exclusions (response exactly as before, no `codigo`):
+  - refusal of the env pair (`PJE_LOGIN_PADRAO`/`PJE_SENHA_PADRAO`) or of the tribunal credential → 500 with normalized text;
+  - refusal text without `loginfailed` (e.g. `Erro ao realizar login via MNI.`); any other `mensagem` (sigilo, `Processo não encontrado`, missing `!`, prefixed text); "não encontrado" text arriving as SoapFault;
+  - legacy `text/html` (`baixado`, no `path_html`/`conteudo_html`) re-fetch in `baixarDocumento` (tribunal credential; `previous` chain cut on purpose) → 500 `Erro ao processar documento HTML:`;
+  - complementary HTML recovery in `DocumentoController` → 200 with `conteudo_html = null`;
+  - `video/mp4` / `video/quicktime` download (`scripts/mni_consultar_documento.sh`) → unchanged;
+  - processo already in DB on `/processo/visualizar` → 200 + `BaixarProcessoMNIJob`, no sync MNI call;
+  - 404 after 3 attempts without link → `{message}` without `codigo`;
+  - all other endpoints, webhooks and monitoramento `erro_resumo`.
 
 ### Export document selection
 

@@ -14,14 +14,14 @@
 | Method | Path | Auth | Handler | Success | Errors |
 |---|---|---|---|---|---|
 | GET | `/api/processo/consultar` | token + default creds | `ConsultarProcessoController@index` | 200 paginator (10/page) | 400, 401, MNI code or 500 |
-| GET | `/api/processo/visualizar` | token + default creds | `ConsultarProcessoController@show` | 200 processo | 400, 401, MNI code or 500 |
+| GET | `/api/processo/visualizar` | token + default creds | `ConsultarProcessoController@show` | 200 processo | 400, 401, 403 (`codigo` `credencial_pje_recusada`), 404 (`codigo` `processo_nao_encontrado`), 422, MNI code or 500 |
 | GET | `/api/processo/dados-basicos` | token + default creds | `ConsultarProcessoController@consultarDadosBasicos` | 200 processo | 401, uncaught → 500 |
 | GET | `/api/processo/movimentos/listar` | token + default creds | `ConsultarProcessoController@consultarMovimentos` | 200 movimento[] | 401, uncaught → 500 |
 | GET | `/api/processo/documentos/listar` | token + default creds | `DocumentoController@listarDocumentos` | 200 documento[] | 401, uncaught → 500 |
 | GET | `/api/processo/consultar/dados-basicos/async` | token + default creds | `ConsultarProcessoController@consultarDadosBasicosAsync` | 200 empty body | 401, 422 |
 | GET | `/api/processo/consultar/movimentos/async` | token + default creds | `ConsultarProcessoController@consultarMovimentosAsync` | 200 empty body | 401, 422 |
 | GET | `/api/processo/consultar/documentos/async` | token + default creds | `DocumentoController@consultarDocumentosAsync` | 200 empty body | 401, 422 |
-| GET | `/api/documento/visualizar` | token + default creds | `DocumentoController@show` | 200 `{message, documento}` | 401, 404, 500 |
+| GET | `/api/documento/visualizar` | token + default creds | `DocumentoController@show` | 200 `{message, documento}` | 401, 403 (`codigo` `credencial_pje_recusada`), 404 (`codigo` `processo_nao_encontrado`, or no `codigo` after 3 attempts), 500 |
 | GET | `/api/tribunais` | token + default creds | `Api\TribunalController@index` | 200 tribunal[] (`ativo = true`) | 401 |
 | GET | `/api/tribunais/{uuid}` | token + default creds | `Api\TribunalController@show` | 200 tribunal; unknown uuid → 200 `{}` | 401 |
 | POST | `/api/processo/download` | token + default creds | `DownloadProcessoController@store` | 200 `{message, exportacao_id}` | 401, 404, 422 |
@@ -58,6 +58,20 @@ Web (session `auth:web`, Inertia, `routes/web.php`): `GET|POST /login`, `POST /l
   "line": 49,
   "file": "/app/Http/Controllers/Api/ConsultarProcessoController.php"
 }
+```
+
+`ErroComCodigo` (`App\Http\Responses\ErroComCodigo`; schema `ErroComCodigo`, `x-dependencia: DEP-01` in `docs/api/openapi.yaml`) — only on `GET /api/processo/visualizar` and `GET /api/documento/visualizar`. Body is exactly `{codigo, message}` with fixed literals: no `error`/`line`/`file`, no tribunal text, credentials or URL. Rules: [`domain_rules.md`](domain_rules.md) "Erros com código estável (DEP-01)".
+
+403, only when the tribunal refused the `login_pje`/`senha_pje` pair sent by the client (default env pair or tribunal credential refused → generic error as before):
+
+```json
+{ "codigo": "credencial_pje_recusada", "message": "Credencial PJe recusada pelo tribunal" }
+```
+
+404, MNI `sucesso = false` with `Processo de número <dígitos> não encontrado!`:
+
+```json
+{ "codigo": "processo_nao_encontrado", "message": "Processo não encontrado no tribunal" }
 ```
 
 422 (Laravel validation, `APP_LOCALE=en`; async call without callback fields in `DocumentoControllerTest`):
@@ -121,7 +135,11 @@ X-API-Token: tk-test
 
 - `GET /api/documento/visualizar?tribunal_id&numero_processo&id_documento[&login_pje&senha_pje]`.
 - `documento.link` = S3 presigned URL, 60 min. `conteudo_html` filled for HTML documents, never persisted. Hidden: `id`, `processo_id`, `path`, `path_html`, `url`, timestamps, `downloaded_at`.
-- 404 `{"message": "Não foi possível obter o documento {id} do processo {numero} após 3 tentativas"}`; `MNIException`/other → 500 `{"message": "..."}`.
+- 404 has two shapes (contract `oneOf`), told apart by `codigo`:
+  - with `codigo`: `{"codigo": "processo_nao_encontrado", "message": "Processo não encontrado no tribunal"}` — the processo does not exist in the tribunal (processo query or binary download); returned on the first occurrence, no retries;
+  - without `codigo`: `{"message": "Não foi possível obter o documento {id} do processo {numero} após 3 tentativas"}` — no link after 3 attempts without exception.
+- 403 `{"codigo": "credencial_pje_recusada", "message": "Credencial PJe recusada pelo tribunal"}` — client pair refused (processo query or binary download); no retries.
+- Other `MNIException`/exceptions → 500 `{"message": "..."}`, unchanged (e.g. `Documento não encontrado`, `Erro ao processar documento PDF:`).
 - `GET /api/processo/documentos/listar` returns documento array; on MNI path each item gets `tipo` (`TipoDocumento` by `codigo` + tribunal).
 
 Response, abridged (`DocumentoControllerTest` "visualizar hidrata conteudo_html do S3", `Storage::fake('s3')` link builder):
