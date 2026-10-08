@@ -2,8 +2,12 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\CredencialPjeRecusadaException;
 use App\Exceptions\MNIException;
+use App\Exceptions\ProcessoNaoEncontradoNoTribunalException;
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\InjectCredenciaisPjePadrao;
+use App\Http\Responses\ErroComCodigo;
 use App\Models\Processo;
 use App\Models\ProcessoDocumento;
 use App\Models\Tribunal;
@@ -31,6 +35,8 @@ class DocumentoController extends Controller
             'senha_pje' => 'nullable|string',
         ]);
 
+        $parDoCliente = (bool) $request->attributes->get(InjectCredenciaisPjePadrao::ATRIBUTO_PAR_DO_CLIENTE, false);
+
         try {
             $maxTentativas = 3;
             $tentativa = 0;
@@ -42,7 +48,8 @@ class DocumentoController extends Controller
                     $request->numero_processo,
                     $tribunal,
                     $request->login_pje,
-                    $request->senha_pje
+                    $request->senha_pje,
+                    $parDoCliente
                 );
 
                 if (!empty($documento) && !empty($documento->link)) {
@@ -58,6 +65,16 @@ class DocumentoController extends Controller
             return response()->json([
                 'message' => 'Não foi possível obter o documento ' . $request->id_documento . ' do processo ' . $request->numero_processo . ' após ' . $maxTentativas . ' tentativas'
             ], 404);
+        } catch (CredencialPjeRecusadaException|ProcessoNaoEncontradoNoTribunalException $e) {
+            // Resposta definitiva do tribunal: sai do laço sem novas tentativas.
+            Log::warning('Falha classificada do tribunal no show', [
+                'excecao' => class_basename($e),
+                'tribunal_id' => $request->tribunal_id,
+                'numero_processo' => $request->numero_processo,
+                'id_documento' => $request->id_documento,
+            ]);
+
+            return ErroComCodigo::resposta($e);
         } catch (MNIException $e) {
             Log::error('MNIException no show: ' . $e->getError() . ' - ' . $e->getLine() . ' - ' . $e->getFile());
             return response()->json(['message' => $e->getError()], 500);
@@ -67,7 +84,7 @@ class DocumentoController extends Controller
         }
     }
 
-    public function getDocumento($id_documento, $numero_processo, $tribunal, $login_pje = null, $senha_pje = null)
+    public function getDocumento($id_documento, $numero_processo, $tribunal, $login_pje = null, $senha_pje = null, bool $parDoCliente = false)
     {
         try {
             $service = app(SalvarDocumentoProcessoService::class);
@@ -120,9 +137,21 @@ class DocumentoController extends Controller
             return null;
         } catch (MNIException $e) {
             Log::error('MNIException ao obter documento: ' . $e->getError());
+
+            // o reembrulho abaixo apagaria o tipo que o show mapeia para 403/404
+            if ($classificada = ErroComCodigo::classificar($e, $parDoCliente)) {
+                throw $classificada;
+            }
+
             throw new MNIException($e->getError(), 500);
         } catch (\Exception $e) {
             Log::error('Erro ao obter documento: ' . $e->getMessage());
+
+            // os wrappers do download levam a falha do tribunal como previous
+            if ($classificada = ErroComCodigo::classificar($e, $parDoCliente)) {
+                throw $classificada;
+            }
+
             throw new MNIException($e->getMessage(), 500);
         }
     }

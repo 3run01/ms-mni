@@ -9,6 +9,7 @@ use App\Services\Processo\ProcessoService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Testing\TestResponse;
 
 uses(DatabaseTransactions::class);
 
@@ -326,6 +327,136 @@ it('visualizar processo ausente com a credencial do tribunal recusada responde 5
         ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe('login-do-tribunal')
         ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe('{SENHA}');
 });
+
+// ---------- erros com codigo em /api/processo/visualizar ----------
+// Valores distintivos para provar que nenhuma credencial vaza no corpo (RNF-01).
+
+const LOGIN_CLIENTE_VISUALIZAR_CODIGO = 'LOGIN-DISTINTO-4471';
+const SENHA_CLIENTE_VISUALIZAR_CODIGO = 'SENHA-DISTINTA-8823';
+const LOGIN_PADRAO_VISUALIZAR_CODIGO = 'LOGIN-PADRAO-3391';
+const SENHA_PADRAO_VISUALIZAR_CODIGO = 'SENHA-PADRAO-7702';
+const LOGIN_TRIBUNAL_VISUALIZAR_CODIGO = 'LOGIN-TRIBUNAL-5309';
+const SENHA_TRIBUNAL_VISUALIZAR_CODIGO = 'SENHA-TRIBUNAL-6617';
+const PROCESSO_NAO_ENCONTRADO_VISUALIZAR_CODIGO = 'Processo de número 99999901120268030001 não encontrado!';
+
+function parDoClienteVisualizarCodigo(): array
+{
+    return ['login_pje' => LOGIN_CLIENTE_VISUALIZAR_CODIGO, 'senha_pje' => SENHA_CLIENTE_VISUALIZAR_CODIGO];
+}
+
+function tribunalVisualizarCodigo(): Tribunal
+{
+    return Tribunal::factory()->create([
+        'login' => LOGIN_TRIBUNAL_VISUALIZAR_CODIGO,
+        'password' => Crypt::encrypt(SENHA_TRIBUNAL_VISUALIZAR_CODIGO),
+    ]);
+}
+
+/**
+ * Confere o corpo cru e o decodificado: o JSON escapa `/`, então um
+ * `https://` só aparece depois de decodificar.
+ */
+function expectCorpoSemSigiloVisualizarCodigo(TestResponse $response): void
+{
+    $corpos = [
+        $response->getContent(),
+        json_encode($response->json(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+    ];
+    $proibidos = [
+        LOGIN_CLIENTE_VISUALIZAR_CODIGO,
+        SENHA_CLIENTE_VISUALIZAR_CODIGO,
+        LOGIN_PADRAO_VISUALIZAR_CODIGO,
+        SENHA_PADRAO_VISUALIZAR_CODIGO,
+        LOGIN_TRIBUNAL_VISUALIZAR_CODIGO,
+        SENHA_TRIBUNAL_VISUALIZAR_CODIGO,
+        'login_pje=',
+        'senha_pje=',
+        'http://',
+        'https://',
+        'loginFailed',
+        'Processo de número',
+    ];
+
+    foreach ($corpos as $corpo) {
+        foreach ($proibidos as $proibido) {
+            expect($corpo)->not->toContain($proibido);
+        }
+    }
+}
+
+it('visualizar processo ausente responde 403 com codigo quando o tribunal recusa o par do cliente com sucesso false', function () {
+    $tribunal = tribunalVisualizarCodigo();
+    $simulador = simularIntegracaoMni(semSucessoVisualizarProcessoErroMni(LOGIN_RECUSADO_VISUALIZAR_ERRO_MNI));
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarProcessoErroMni($tribunal, parDoClienteVisualizarCodigo()))
+        ->assertStatus(403)
+        ->assertExactJson([
+            'codigo' => 'credencial_pje_recusada',
+            'message' => 'Credencial PJe recusada pelo tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe(LOGIN_CLIENTE_VISUALIZAR_CODIGO)
+        ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe(SENHA_CLIENTE_VISUALIZAR_CODIGO);
+});
+
+it('visualizar processo ausente responde 403 com codigo quando o tribunal recusa o par do cliente com fault CXF', function () {
+    $tribunal = tribunalVisualizarCodigo();
+    $simulador = simularIntegracaoMni(
+        fn () => throw new SoapFault('Server', 'org.apache.cxf.interceptor.Fault: exception invoking: loginFailed')
+    );
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarProcessoErroMni($tribunal, parDoClienteVisualizarCodigo()))
+        ->assertStatus(403)
+        ->assertExactJson([
+            'codigo' => 'credencial_pje_recusada',
+            'message' => 'Credencial PJe recusada pelo tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1);
+});
+
+it('visualizar processo ausente responde 404 com codigo quando o tribunal diz que o processo não existe', function (array $credenciais, ?array $parPadrao, string $loginUsado, string $senhaUsada) {
+    definirCredenciaisPadrao(...($parPadrao ?? [null, null]));
+    $tribunal = tribunalVisualizarCodigo();
+    $simulador = simularIntegracaoMni(semSucessoVisualizarProcessoErroMni(PROCESSO_NAO_ENCONTRADO_VISUALIZAR_CODIGO));
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarProcessoErroMni($tribunal, $credenciais))
+        ->assertStatus(404)
+        ->assertExactJson([
+            'codigo' => 'processo_nao_encontrado',
+            'message' => 'Processo não encontrado no tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe($loginUsado)
+        ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe($senhaUsada);
+})->with([
+    'par do cliente' => [
+        ['login_pje' => LOGIN_CLIENTE_VISUALIZAR_CODIGO, 'senha_pje' => SENHA_CLIENTE_VISUALIZAR_CODIGO],
+        null,
+        LOGIN_CLIENTE_VISUALIZAR_CODIGO,
+        SENHA_CLIENTE_VISUALIZAR_CODIGO,
+    ],
+    'par padrão' => [
+        [],
+        [LOGIN_PADRAO_VISUALIZAR_CODIGO, SENHA_PADRAO_VISUALIZAR_CODIGO],
+        LOGIN_PADRAO_VISUALIZAR_CODIGO,
+        SENHA_PADRAO_VISUALIZAR_CODIGO,
+    ],
+    'credencial do tribunal' => [
+        [],
+        null,
+        LOGIN_TRIBUNAL_VISUALIZAR_CODIGO,
+        SENHA_TRIBUNAL_VISUALIZAR_CODIGO,
+    ],
+]);
 
 // ---------- endpoints com credenciais opcionais ----------
 

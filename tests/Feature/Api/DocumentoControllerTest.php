@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\Fluent\AssertableJson;
+use Illuminate\Testing\TestResponse;
 
 uses(DatabaseTransactions::class);
 
@@ -513,4 +514,126 @@ it('visualizar documento ausente com a credencial do tribunal recusada responde 
         ->and($simulador->requisicoes[0]['parametros'])->not->toHaveKey('documento')
         ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe('login-do-tribunal')
         ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe('{SENHA}');
+});
+
+// ---------- erros com codigo em /api/documento/visualizar ----------
+// Par do cliente com valores distintivos para provar que nenhuma credencial
+// vaza no corpo (RNF-01). Uma chamada SOAP só: a falha classificada encerra
+// o laço de 3 tentativas.
+
+const LOGIN_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO = 'LOGIN-DISTINTO-5582';
+const SENHA_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO = 'SENHA-DISTINTA-9934';
+
+function parDoClienteVisualizarDocumentoCodigo(): array
+{
+    return ['login_pje' => LOGIN_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO, 'senha_pje' => SENHA_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO];
+}
+
+/**
+ * Confere o corpo cru e o decodificado: o JSON escapa `/`, então um
+ * `https://` só aparece depois de decodificar.
+ */
+function expectCorpoSemSigiloVisualizarDocumentoCodigo(TestResponse $response): void
+{
+    $corpos = [
+        $response->getContent(),
+        json_encode($response->json(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+    ];
+    $proibidos = [
+        LOGIN_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO,
+        SENHA_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO,
+        'login-do-tribunal',
+        '{SENHA}',
+        'login_pje=',
+        'senha_pje=',
+        'http://',
+        'https://',
+        'loginFailed',
+        'Processo de número',
+    ];
+
+    foreach ($corpos as $corpo) {
+        foreach ($proibidos as $proibido) {
+            expect($corpo)->not->toContain($proibido);
+        }
+    }
+}
+
+it('visualizar documento ausente responde 403 com codigo quando o tribunal recusa o par do cliente na consulta do processo', function () {
+    $tribunal = tribunalVisualizarDocumentoErroMni();
+    $simulador = simularIntegracaoMni(semSucessoVisualizarDocumentoErroMni(LOGIN_RECUSADO_VISUALIZAR_DOCUMENTO_ERRO_MNI));
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarDocumentoErroMni($tribunal->id, 'VISCODIGO' . getmypid() . 'A', 950001, parDoClienteVisualizarDocumentoCodigo()))
+        ->assertStatus(403)
+        ->assertExactJson([
+            'codigo' => 'credencial_pje_recusada',
+            'message' => 'Credencial PJe recusada pelo tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarDocumentoCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros'])->not->toHaveKey('documento')
+        ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe(LOGIN_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO)
+        ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe(SENHA_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO);
+});
+
+it('visualizar documento pendente responde 403 com codigo quando o tribunal recusa o par do cliente no download', function (string $mimetype) {
+    Storage::fake('s3');
+    [$processo, $documentos] = criarDocumentosLote([['mimetype' => $mimetype]]);
+    $documento = $documentos->first();
+    $simulador = simularIntegracaoMni(semSucessoVisualizarDocumentoErroMni(LOGIN_RECUSADO_VISUALIZAR_DOCUMENTO_ERRO_MNI));
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarDocumentoErroMni($processo->tribunal_id, $processo->numero_processo, $documento->id_documento, parDoClienteVisualizarDocumentoCodigo()))
+        ->assertStatus(403)
+        ->assertExactJson([
+            'codigo' => 'credencial_pje_recusada',
+            'message' => 'Credencial PJe recusada pelo tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarDocumentoCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento)
+        ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe(LOGIN_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO)
+        ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe(SENHA_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO);
+})->with([
+    'PDF' => 'application/pdf',
+    'HTML' => 'text/html',
+]);
+
+it('visualizar documento ausente responde 404 com codigo quando a consulta do processo diz que ele não existe no tribunal', function () {
+    $tribunal = tribunalVisualizarDocumentoErroMni();
+    $simulador = simularIntegracaoMni(semSucessoVisualizarDocumentoErroMni(PROCESSO_NAO_ENCONTRADO_VISUALIZAR_DOCUMENTO_ERRO_MNI));
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarDocumentoErroMni($tribunal->id, 'VISCODIGO' . getmypid() . 'B', 950002, parDoClienteVisualizarDocumentoCodigo()))
+        ->assertStatus(404)
+        ->assertExactJson([
+            'codigo' => 'processo_nao_encontrado',
+            'message' => 'Processo não encontrado no tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarDocumentoCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros'])->not->toHaveKey('documento');
+});
+
+it('visualizar PDF pendente responde 404 com codigo quando o download diz que o processo não existe no tribunal', function () {
+    Storage::fake('s3');
+    [$processo, $documentos] = criarDocumentosLote(1);
+    $documento = $documentos->first();
+    $simulador = simularIntegracaoMni(semSucessoVisualizarDocumentoErroMni(PROCESSO_NAO_ENCONTRADO_VISUALIZAR_DOCUMENTO_ERRO_MNI));
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarDocumentoErroMni($processo->tribunal_id, $processo->numero_processo, $documento->id_documento, parDoClienteVisualizarDocumentoCodigo()))
+        ->assertStatus(404)
+        ->assertExactJson([
+            'codigo' => 'processo_nao_encontrado',
+            'message' => 'Processo não encontrado no tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarDocumentoCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento);
 });
