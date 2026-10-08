@@ -12,6 +12,7 @@
         "h4cc/wkhtmltoimage-amd64": "^0.12.4",
         "h4cc/wkhtmltopdf-amd64": "^0.12.4",
         "inertiajs/inertia-laravel": "^2.0",
+        "laravel/ai": "^1.2",
         "laravel/framework": "^13.0",
         "laravel/horizon": "^5.47",
         "laravel/octane": "^2.6",
