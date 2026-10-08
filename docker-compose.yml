@@ -13,6 +13,8 @@ services:
         depends_on:
             redis:
                 condition: service_healthy
+            postgres:
+                condition: service_healthy
         volumes:
             - .:/var/www/app
             - ./docker/php/extra-php.ini:/usr/local/etc/php/conf.d/extra-php.ini
@@ -23,10 +25,10 @@ services:
 
     redis:
         image: redis:7.4.0
-        container_name: redis
+        container_name: ms_mni_redis
         restart: always
         ports:
-            - "6379:6379"
+            - "${REDIS_FORWARD_PORT:-6380}:6379"
         volumes:
             - redis-data:/data
         networks:
@@ -38,8 +40,34 @@ services:
             retries: 5
             start_period: 10s
 
+    postgres:
+        image: pgvector/pgvector:pg18
+        container_name: ms_mni_postgres
+        restart: always
+        environment:
+            POSTGRES_DB: ${DB_DATABASE:-ms_mni}
+            POSTGRES_USER: ${DB_USERNAME:-postgres}
+            POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+        ports:
+            - "${DB_FORWARD_PORT:-5435}:5432"
+        volumes:
+            # A partir do Postgres 18 o volume fica em /var/lib/postgresql (PGDATA=/var/lib/postgresql/18/docker)
+            - postgres-data:/var/lib/postgresql
+            - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+            - ./docker/postgres/dumps:/dumps:ro
+        networks:
+            - desenvolvimento
+        healthcheck:
+            # Via TCP para só ficar saudável após o init (o servidor temporário do init escuta apenas no socket)
+            test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+            interval: 5s
+            timeout: 3s
+            retries: 10
+            start_period: 60s
+
 volumes:
     redis-data:
+    postgres-data:
 
 networks:
     desenvolvimento:

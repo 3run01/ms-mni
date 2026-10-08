@@ -47,3 +47,7 @@ node_modules/
 # Task files
 # tasks.json
 # tasks/ 
+
+# Dumps locais do Postgres (podem conter dados reais)
+/docker/postgres/dumps/*
+!/docker/postgres/dumps/.gitkeep
