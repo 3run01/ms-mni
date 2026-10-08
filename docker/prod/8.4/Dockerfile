@@ -4,7 +4,7 @@
 FROM oven/bun:1-alpine AS bun
 
 # =============================================================================
-FROM dunglas/frankenphp:1-php8.4-alpine
+FROM dunglas/frankenphp:1-php8.5-alpine
 
 LABEL maintainer="Pedro Viana"
 

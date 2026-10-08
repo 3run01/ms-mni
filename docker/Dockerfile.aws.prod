@@ -1,4 +1,4 @@
-FROM dunglas/frankenphp:php8.3-bookworm
+FROM dunglas/frankenphp:php8.5-bookworm
 
 ARG APP_DIR=/var/www/app
 
