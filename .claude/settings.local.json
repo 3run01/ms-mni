@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(php -v)",
+      "Bash(composer -V)",
+      "Bash(curl -s \"https://repo.packagist.org/p2/inertiajs/inertia-laravel.json\")",
+      "Bash(python3 -I -c ' *)",
+      "Bash(mkdir -p ref)",
+      "Bash(curl -sL https://raw.githubusercontent.com/laravel/laravel/13.x/composer.json -o ref/skeleton-composer.json)",
+      "Bash(curl -sL https://raw.githubusercontent.com/laravel/docs/13.x/upgrade.md -o ref/upgrade13.md)",
+      "Bash(curl -sL https://raw.githubusercontent.com/laravel/docs/12.x/upgrade.md -o ref/upgrade12.md)",
+      "Bash(python3 -I -c \"import json,sys; l=json.load\\(sys.stdin\\); print\\(l[-1] if l else None\\)\")",
+      "Bash(docker exec *)",
+      "Bash(grep -n \"'sim'\\\\|DB_SIM\\\\|=> \\\\[$\" config/database.php)",
+      "Bash(docker compose *)",
+      "Bash(git switch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
