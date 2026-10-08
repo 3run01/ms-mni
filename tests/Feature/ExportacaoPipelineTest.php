@@ -31,6 +31,9 @@ it('pipeline: POST /api/processo/download → PDF → S3 → webhook', function 
         'data_hora' => '2024-12-12 10:00:00',
         'tipo_documento' => '0',
         'descricao' => 'Documento Teste',
+        // A exportação só considera documento já baixado e com path no S3
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => 'docs/1.pdf',
     ]);
 
     $response = $this->withHeaders(['X-API-Token' => 'tk-test'])

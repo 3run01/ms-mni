@@ -6,6 +6,16 @@ use Inertia\Testing\AssertableInertia as Assert;
 
 uses(DatabaseTransactions::class);
 
+/**
+ * Versão que o HandleInertiaRequests compara no partial reload. Com
+ * public/build/manifest.json presente ela é o hash do manifest, e
+ * Inertia::getVersion() só a conhece depois do primeiro request do teste.
+ */
+function versaoInertiaDashboard(): string
+{
+    return (string) app(\App\Http\Middleware\HandleInertiaRequests::class)->version(request());
+}
+
 it('renderiza o dashboard via Inertia com o usuário autenticado', function () {
     $user = User::factory()->make(['id' => 1]);
 
@@ -65,7 +75,7 @@ it('entrega metricas no partial reload com o shape esperado', function () {
     $this->actingAs($user)
         ->get('/dashboard?periodo=7', [
             'X-Inertia' => 'true',
-            'X-Inertia-Version' => \Inertia\Inertia::getVersion() ?? '',
+            'X-Inertia-Version' => versaoInertiaDashboard(),
             'X-Inertia-Partial-Component' => 'dashboard',
             'X-Inertia-Partial-Data' => 'metricas',
         ])
@@ -93,7 +103,7 @@ it('conta monitoramentos ativos no card da home', function () {
     $this->actingAs(User::factory()->make(['id' => 1]))
         ->get('/dashboard?periodo=7', [
             'X-Inertia' => 'true',
-            'X-Inertia-Version' => \Inertia\Inertia::getVersion() ?? '',
+            'X-Inertia-Version' => versaoInertiaDashboard(),
             'X-Inertia-Partial-Component' => 'dashboard',
             'X-Inertia-Partial-Data' => 'metricas',
         ])
@@ -105,7 +115,7 @@ it('monitoramentos ativos é estado atual, não recorte do período', function (
     $metricas = fn () => $this->actingAs(User::factory()->make(['id' => 1]))
         ->get('/dashboard?periodo=7', [
             'X-Inertia' => 'true',
-            'X-Inertia-Version' => \Inertia\Inertia::getVersion() ?? '',
+            'X-Inertia-Version' => versaoInertiaDashboard(),
             'X-Inertia-Partial-Component' => 'dashboard',
             'X-Inertia-Partial-Data' => 'metricas',
         ])

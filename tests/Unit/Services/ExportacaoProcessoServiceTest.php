@@ -21,11 +21,16 @@ function criarProcessoComDocumentos(string $numero, array $docs): Processo
     ]);
 
     foreach ($docs as $doc) {
+        // A exportação só considera documento já baixado e com path no S3
+        $idDocumento = $doc['id_documento'] ?? 0;
+
         ProcessoDocumento::create(array_merge([
             'processo_id' => $processo->id,
             'mimetype' => 'application/pdf',
             'tipo_documento' => '0',
             'descricao' => 'documento teste',
+            'status' => ProcessoDocumento::STATUS_BAIXADO,
+            'path' => "docs/{$idDocumento}.pdf",
         ], $doc));
     }
 
