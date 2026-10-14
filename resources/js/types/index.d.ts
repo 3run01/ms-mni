@@ -38,6 +38,13 @@ export interface ApiTokenListItem {
     created_at: string;
 }
 
+export interface UsuarioListItem {
+    id: number;
+    name: string;
+    email: string;
+    created_at: string;
+}
+
 export interface SharedProps {
     app: { name: string };
     auth: { user: User | null };
