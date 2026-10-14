@@ -6,6 +6,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MonitoramentoController;
 use App\Http\Controllers\ProcessoController;
 use App\Http\Controllers\TribunalController;
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 // Rotas públicas
@@ -47,6 +48,12 @@ Route::middleware('auth:web')->group(function () {
     Route::post('/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');
     Route::patch('/tokens/{apiToken}/ativo', [ApiTokenController::class, 'toggleAtivo'])->name('tokens.toggle');
     Route::delete('/tokens/{apiToken}', [ApiTokenController::class, 'destroy'])->name('tokens.destroy');
+
+    Route::get('/usuarios', [UserController::class, 'index'])->name('usuarios.index');
+    Route::get('/usuarios/criar', [UserController::class, 'create'])->name('usuarios.create');
+    Route::post('/usuarios', [UserController::class, 'store'])->name('usuarios.store');
+    Route::get('/usuarios/{user}/editar', [UserController::class, 'edit'])->name('usuarios.edit');
+    Route::put('/usuarios/{user}', [UserController::class, 'update'])->name('usuarios.update');
 
     Route::get('/monitoramentos', [MonitoramentoController::class, 'index'])->name('monitoramentos.index');
 
