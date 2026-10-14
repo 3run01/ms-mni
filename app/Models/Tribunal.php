@@ -17,11 +17,20 @@ class Tribunal extends Model
     const TIPO_STM = 'Superior Tribunal Militar (STM)';
     const TIPO_TST = 'Tribunal Superior do Trabalho (TST)';
     const TIPO_TSE = 'Tribunal Superior Eleitoral (TSE)';
+    const TIPO_TJ = 'Tribunal de Justiça';
+
+    // formato derivado do número CNJ, comparado pelo cliente da API (DEP-02)
+    const REGEX_SIGLA = '/^(STF|STJ|STM|TST|TSE|TJDFT|TRF[1-6]|TRT([1-9]|1[0-9]|2[0-4])|TRE-[A-Z]{2}|TJ[A-Z]{2}|TJM[A-Z]{2})$/';
+
+    // várias linhas ativas podem ter a mesma sigla; o grau as distingue
+    const GRAUS = ['1', '2'];
 
     protected $logName = 'Tribunal';
     protected $table = 'tribunais';
     protected $fillable = [
         'nome',
+        'sigla',
+        'grau',
         'url_webservice_mni',
         'url_webservice_mni_consultar_processo',
         'url_webservice_mni_complementar',
@@ -80,7 +89,8 @@ class Tribunal extends Model
             self::TIPO_STJ,
             self::TIPO_STM,
             self::TIPO_TST,
-            self::TIPO_TSE
+            self::TIPO_TSE,
+            self::TIPO_TJ,
         ];
     }
     public function tiposDocumentos()

@@ -192,6 +192,13 @@ Scope: `GET /processo/visualizar` and `GET /documento/visualizar` only. Status d
   - 404 after 3 attempts without link → `{message}` without `codigo`;
   - all other endpoints, webhooks and monitoramento `erro_resumo`.
 
+### Sigla e grau do tribunal (DEP-02)
+
+- `tribunais.sigla` follows the CNJ-derived format the API client compares against (`Tribunal::REGEX_SIGLA`, same `pattern` as schema `Tribunal.sigla` in `docs/api/openapi.yaml`): STF, STJ, STM, TST, TSE, TJDFT, `TRF1`–`TRF6`, `TRT1`–`TRT24`, `TRE-<UF>`, `TJ<UF>`, `TJM<UF>`.
+- Several active rows may share a `sigla` (e.g. TJAP PJe 1º and 2º grau, separate MNI endpoints); `grau` (`"1"`, `"2"`, null) tells them apart and the client lets the user pick the row. No uniqueness constraint on `sigla`.
+- Admin (`TribunalRequest`): `sigla` required, trimmed and uppercased before the regex; `grau` nullable, `in:1,2`.
+- Migration `2026_10_08_120000_add_sigla_grau_to_tribunais_table` backfills only rows with `sigla` null, from the start of `nome` (`grau` from `1º`/`2º grau`); underivable rows stay null and are logged (`tribunais: sigla não derivável do nome`). It also fixes `tipo` `Superior Tribunal de Justiça (STJ)` → `Tribunal de Justiça` on `TJ<UF>`/`TJDFT` rows; `down()` drops the columns without reverting `tipo`.
+
 ### Export document selection
 
 `ExportacaoProcessoService::queryDocumentos` — base: documentos of `numero_processo` with `status = baixado`, `mimetype` in (`application/pdf`, `text/html`), `path` not null; ordered by `id_documento` asc.

@@ -13,6 +13,13 @@ class TribunalRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->sigla)) {
+            $this->merge(['sigla' => mb_strtoupper(trim($this->sigla))]);
+        }
+    }
+
     /**
      * @return array<string, array<int, mixed>>
      */
@@ -20,6 +27,8 @@ class TribunalRequest extends FormRequest
     {
         return [
             'nome' => ['required', 'string', 'max:255'],
+            'sigla' => ['required', 'string', 'regex:' . Tribunal::REGEX_SIGLA],
+            'grau' => ['nullable', 'string', Rule::in(Tribunal::GRAUS)],
             'tipo' => ['nullable', 'string', Rule::in(Tribunal::getTipos())],
             'url_webservice_mni' => ['required', 'url', 'max:255'],
             'url_webservice_mni_complementar' => ['required', 'url', 'max:255'],

@@ -21,17 +21,20 @@
 
 ### Entities
 
-**`tribunais`** — `App\Models\Tribunal` (SoftDeletes); recreated by `2026_07_14_100002_recreate_tribunais_table.php`
+**`tribunais`** — `App\Models\Tribunal` (SoftDeletes); recreated by `2026_07_14_100002_recreate_tribunais_table.php`; `sigla`/`grau` added and backfilled by `2026_10_08_120000_add_sigla_grau_to_tribunais_table.php`
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | bigint PK | |
 | `uuid` | uuid unique nullable | set on create when column exists |
 | `nome` | string(255) | |
+| `sigla` | string(10) nullable | CNJ-derived court acronym (`Tribunal::REGEX_SIGLA`: STF, STJ, STM, TST, TSE, TJDFT, TRF1–6, TRT1–24, TRE-UF, TJ+UF, TJM+UF); required by `TribunalRequest`; not unique — several active rows may share it (DEP-02) |
+| `grau` | string(1) nullable | `"1"`, `"2"` or null (`Tribunal::GRAUS`); tells apart rows with the same `sigla` |
 | `login` / `password` | string nullable / text nullable | tribunal fallback credential; `password` read via `Crypt::decrypt`; hidden |
 | `url_webservice_mni`, `url_webservice_mni_complementar` | string(255) required | hidden |
 | `url_webservice_mni_consultar_processo`, `url_webservice_mni_criminal`, `url_consulta_pje`, `url_recuperar_senha_tribunal` | string nullable | |
-| `tipo`, `versao_mni`, `codigo_peticao_inicial`, `codigo_peticao_avulsa`, `codigo_certidao_inicio_fim`, `codigo_seeu`, `usar_codigo_documento_padrao` | string nullable | |
+| `tipo` | string nullable | one of `Tribunal::getTipos()` (5 superior courts + `Tribunal de Justiça`) |
+| `versao_mni`, `codigo_peticao_inicial`, `codigo_peticao_avulsa`, `codigo_certidao_inicio_fim`, `codigo_seeu`, `usar_codigo_documento_padrao` | string nullable | |
 | `ativo` | boolean nullable | API lists only `true`; `Processo::tribunal()` filters `ativo = true` |
 | `usar_credencial_tribunal`, `enviar_dados_criminais` | boolean default false | |
 

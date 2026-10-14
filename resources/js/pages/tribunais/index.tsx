@@ -48,6 +48,8 @@ export default function TribunaisIndex({ tribunais }: { tribunais: TribunalListI
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Nome</TableHead>
+                                <TableHead>Sigla</TableHead>
+                                <TableHead>Grau</TableHead>
                                 <TableHead>Tipo</TableHead>
                                 <TableHead>Versão MNI</TableHead>
                                 <TableHead>Ativo</TableHead>
@@ -58,6 +60,8 @@ export default function TribunaisIndex({ tribunais }: { tribunais: TribunalListI
                             {tribunais.map((tribunal) => (
                                 <TableRow key={tribunal.id}>
                                     <TableCell className="font-medium">{tribunal.nome}</TableCell>
+                                    <TableCell>{tribunal.sigla ?? '—'}</TableCell>
+                                    <TableCell>{tribunal.grau ? `${tribunal.grau}º` : '—'}</TableCell>
                                     <TableCell className="text-muted-foreground">
                                         {tribunal.tipo ?? '—'}
                                     </TableCell>
@@ -80,7 +84,7 @@ export default function TribunaisIndex({ tribunais }: { tribunais: TribunalListI
                             ))}
                             {tribunais.length === 0 && (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                                    <TableCell colSpan={7} className="text-center text-muted-foreground">
                                         Nenhum tribunal cadastrado.
                                     </TableCell>
                                 </TableRow>

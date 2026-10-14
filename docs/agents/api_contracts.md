@@ -22,8 +22,8 @@
 | GET | `/api/processo/consultar/movimentos/async` | token + default creds | `ConsultarProcessoController@consultarMovimentosAsync` | 200 empty body | 401, 422 |
 | GET | `/api/processo/consultar/documentos/async` | token + default creds | `DocumentoController@consultarDocumentosAsync` | 200 empty body | 401, 422 |
 | GET | `/api/documento/visualizar` | token + default creds | `DocumentoController@show` | 200 `{message, documento}` | 401, 403 (`codigo` `credencial_pje_recusada`), 404 (`codigo` `processo_nao_encontrado`, or no `codigo` after 3 attempts), 500 |
-| GET | `/api/tribunais` | token + default creds | `Api\TribunalController@index` | 200 tribunal[] (`ativo = true`) | 401 |
-| GET | `/api/tribunais/{uuid}` | token + default creds | `Api\TribunalController@show` | 200 tribunal; unknown uuid → 200 `{}` | 401 |
+| GET | `/api/tribunais` | token + default creds | `Api\TribunalController@index` | 200 tribunal[] (`ativo = true`), each with `sigla` and `grau` (DEP-02) | 401 |
+| GET | `/api/tribunais/{uuid}` | token + default creds | `Api\TribunalController@show` | 200 tribunal with `sigla`/`grau`; unknown uuid → 200 `{}` | 401 |
 | POST | `/api/processo/download` | token + default creds | `DownloadProcessoController@store` | 200 `{message, exportacao_id}` | 401, 404, 422 |
 | POST | `/api/processo/monitoramentos` | token | `MonitoramentoProcessoController@store` | 201 created / 200 updated | 401, 422 |
 | GET | `/api/processo/monitoramentos` | token | `@index` (`?status=`) | 200 paginated `data` (10/page) | 401 |

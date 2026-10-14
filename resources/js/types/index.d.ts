@@ -22,6 +22,8 @@ export interface NavItem {
 export interface TribunalListItem {
     id: number;
     nome: string;
+    sigla: string | null;
+    grau: string | null;
     tipo: string | null;
     versao_mni: string | null;
     ativo: boolean | null;

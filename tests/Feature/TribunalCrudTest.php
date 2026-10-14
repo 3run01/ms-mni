@@ -11,6 +11,7 @@ function tribunalPayload(array $overrides = []): array
 {
     return array_merge([
         'nome' => 'Tribunal de Teste E2E',
+        'sigla' => 'STJ',
         'tipo' => Tribunal::TIPO_STJ,
         'url_webservice_mni' => 'https://tribunal.test/mni',
         'url_webservice_mni_complementar' => 'https://tribunal.test/mni-complementar',
@@ -46,7 +47,8 @@ it('renderiza o formulário de criação com os tipos', function () {
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('tribunais/create')
-            ->has('tipos', 5));
+            ->has('tipos', 6)
+            ->where('tipos', fn ($tipos) => collect($tipos)->contains(Tribunal::TIPO_TJ)));
 });
 
 it('cria tribunal e redireciona com flash', function () {
@@ -72,7 +74,7 @@ it('cria tribunal sem credenciais (colunas nullable)', function () {
 it('valida campos obrigatórios no store', function () {
     $this->actingAs(autenticado())
         ->post('/tribunais', [])
-        ->assertInvalid(['nome', 'url_webservice_mni', 'url_webservice_mni_complementar']);
+        ->assertInvalid(['nome', 'sigla', 'url_webservice_mni', 'url_webservice_mni_complementar']);
 });
 
 it('rejeita tipo fora da lista', function () {
@@ -126,4 +128,59 @@ it('inverte o ativo no toggle', function () {
         ->assertRedirect('/tribunais');
 
     expect($tribunal->fresh()->ativo)->toBeFalse();
+});
+
+it('grava sigla e grau, normalizando a sigla para maiúsculas', function () {
+    $this->actingAs(autenticado())
+        ->post('/tribunais', tribunalPayload([
+            'nome' => 'TJAP 2º Grau Teste',
+            'sigla' => ' tjap ',
+            'grau' => '2',
+            'tipo' => Tribunal::TIPO_TJ,
+        ]))
+        ->assertRedirect(route('tribunais.index'));
+
+    $tribunal = Tribunal::where('nome', 'TJAP 2º Grau Teste')->first();
+    expect($tribunal->sigla)->toBe('TJAP');
+    expect($tribunal->grau)->toBe('2');
+    expect($tribunal->tipo)->toBe(Tribunal::TIPO_TJ);
+});
+
+it('aceita siglas válidas do formato CNJ', function (string $sigla) {
+    $this->actingAs(autenticado())
+        ->post('/tribunais', tribunalPayload(['sigla' => $sigla]))
+        ->assertValid(['sigla']);
+})->with(['STF', 'TJDFT', 'TRF6', 'TRT9', 'TRT24', 'TRE-SP', 'TJSP', 'TJMSP']);
+
+it('rejeita sigla fora do formato CNJ', function (string $sigla) {
+    $this->actingAs(autenticado())
+        ->post('/tribunais', tribunalPayload(['sigla' => $sigla]))
+        ->assertInvalid(['sigla']);
+})->with(['TJ SP', 'TRF7', 'TRT25', 'TRE SP', 'TJ-SP', 'Tribunal']);
+
+it('rejeita grau fora de 1 ou 2', function () {
+    $this->actingAs(autenticado())
+        ->post('/tribunais', tribunalPayload(['grau' => '3']))
+        ->assertInvalid(['grau']);
+});
+
+it('permite duas linhas ativas com a mesma sigla em graus diferentes', function () {
+    foreach (['1', '2'] as $grau) {
+        $this->actingAs(autenticado())
+            ->post('/tribunais', tribunalPayload(['nome' => "TJXX {$grau}º Grau", 'sigla' => 'TJXX', 'grau' => $grau]))
+            ->assertRedirect(route('tribunais.index'));
+    }
+
+    expect(Tribunal::where('sigla', 'TJXX')->where('ativo', true)->pluck('grau')->sort()->values()->all())
+        ->toBe(['1', '2']);
+});
+
+it('expõe sigla e grau no formulário de edição', function () {
+    $tribunal = Tribunal::factory()->create(['sigla' => 'TJAP', 'grau' => '1']);
+
+    $this->actingAs(autenticado())
+        ->get("/tribunais/{$tribunal->id}/editar")
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('tribunal.sigla', 'TJAP')
+            ->where('tribunal.grau', '1'));
 });

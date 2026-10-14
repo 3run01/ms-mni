@@ -3,12 +3,15 @@
 use Symfony\Component\Yaml\Yaml;
 
 /*
- * Contrato oficial × cópia acordada com o Sistema Jurídico (DEP-01).
+ * Contrato oficial × cópia acordada com o Sistema Jurídico (DEP-01 e DEP-02).
  *
  * Os 5 nós DEP-01 foram copiados literalmente da cópia acordada. A estrutura
  * esperada abaixo é a dessa cópia sem `description`, `example`, `examples` e
  * `summary` (texto livre, Q-09), mantendo `x-dependencia`. Qualquer mudança de
  * nome, status, campo ou estrutura nesses nós quebra o cliente.
+ *
+ * DEP-02 (`sigla`/`grau` em Tribunal): `sigla` igual à cópia; `grau` ganhou
+ * `enum` com os valores aceitos ("1", "2" ou null).
  */
 
 const CHAVES_TEXTO_LIVRE_CONTRATO_DEP01 = ['description', 'example', 'examples', 'summary'];
@@ -116,10 +119,26 @@ it('tem os nós DEP-01 iguais à cópia acordada, ignorando o texto livre', func
     ],
 ]);
 
-it('não traz sigla nem grau no schema Tribunal (DEP-02 fora do escopo)', function () {
-    expect(contratoOficialDep01()['components']['schemas']['Tribunal']['properties'])
-        ->not->toHaveKey('sigla')
-        ->not->toHaveKey('grau');
+it('traz sigla e grau no schema Tribunal (DEP-02)', function () {
+    $propriedades = contratoOficialDep01()['components']['schemas']['Tribunal']['properties'];
+
+    expect(semTextoLivreContratoDep01($propriedades['sigla']))->toEqual([
+        'type' => 'string',
+        'x-dependencia' => 'DEP-02',
+        'pattern' => '^(STF|STJ|STM|TST|TSE|TJDFT|TRF[1-6]|TRT([1-9]|1[0-9]|2[0-4])|TRE-[A-Z]{2}|TJ[A-Z]{2}|TJM[A-Z]{2})$',
+    ]);
+
+    expect(semTextoLivreContratoDep01($propriedades['grau']))->toEqual([
+        'type' => ['string', 'null'],
+        'enum' => ['1', '2', null],
+        'x-dependencia' => 'DEP-02',
+    ]);
+});
+
+it('usa no contrato a mesma regex de sigla que a validação do admin', function () {
+    $pattern = contratoOficialDep01()['components']['schemas']['Tribunal']['properties']['sigla']['pattern'];
+
+    expect('/' . $pattern . '/')->toBe(\App\Models\Tribunal::REGEX_SIGLA);
 });
 
 it('mantém em PaginacaoProcessos os campos que só existem no contrato oficial', function () {

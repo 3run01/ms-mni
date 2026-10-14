@@ -14,7 +14,7 @@ class TribunalController extends Controller
     {
         return Inertia::render('tribunais/index', [
             'tribunais' => Tribunal::query()
-                ->select(['id', 'nome', 'tipo', 'versao_mni', 'ativo'])
+                ->select(['id', 'nome', 'sigla', 'grau', 'tipo', 'versao_mni', 'ativo'])
                 ->orderBy('nome')
                 ->get(),
         ]);
@@ -41,6 +41,8 @@ class TribunalController extends Controller
             'tribunal' => $tribunal->only([
                 'id',
                 'nome',
+                'sigla',
+                'grau',
                 'tipo',
                 'versao_mni',
                 'ativo',

@@ -16,6 +16,8 @@ class TribunalFactory extends Factory
     {
         return [
             'nome' => 'Tribunal ' . fake()->unique()->company(),
+            'sigla' => 'TJAP',
+            'grau' => null,
             'tipo' => null,
             'login' => fake()->userName(),
             'password' => fake()->password(12),
