@@ -16,10 +16,13 @@ import {
 } from '@/components/ui/select';
 
 const SEM_TIPO = '__none__';
+const SEM_GRAU = '__none__';
 
 export interface TribunalFormValues {
     id: number;
     nome: string;
+    sigla: string | null;
+    grau: string | null;
     tipo: string | null;
     versao_mni: string | null;
     ativo: boolean | null;
@@ -55,6 +58,8 @@ export default function TribunalForm({
 }) {
     const { data, setData, post, put, processing, errors } = useForm({
         nome: tribunal?.nome ?? '',
+        sigla: tribunal?.sigla ?? '',
+        grau: tribunal?.grau ?? null,
         tipo: tribunal?.tipo ?? null,
         versao_mni: tribunal?.versao_mni ?? '',
         ativo: Boolean(tribunal?.ativo ?? true),
@@ -111,6 +116,36 @@ export default function TribunalForm({
                         aria-invalid={!!errors.nome}
                     />
                     <InputError message={errors.nome} />
+                </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="sigla">Sigla *</Label>
+                    <Input
+                        id="sigla"
+                        value={data.sigla}
+                        onChange={(e) => setData('sigla', e.target.value.toUpperCase())}
+                        placeholder="TJSP, TRF1, TRT2, TRE-SP"
+                        aria-invalid={!!errors.sigla}
+                    />
+                    <InputError message={errors.sigla} />
+                </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="grau">Grau</Label>
+                    <Select
+                        value={data.grau ?? SEM_GRAU}
+                        onValueChange={(value) => setData('grau', value === SEM_GRAU ? null : value)}
+                    >
+                        <SelectTrigger id="grau" aria-invalid={!!errors.grau}>
+                            <SelectValue placeholder="Selecione o grau" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value={SEM_GRAU}>Nenhum</SelectItem>
+                            <SelectItem value="1">1º grau</SelectItem>
+                            <SelectItem value="2">2º grau</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <InputError message={errors.grau} />
                 </div>
 
                 <div className="space-y-2">

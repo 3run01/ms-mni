@@ -2,8 +2,9 @@
 
 namespace App\Services\Processo;
 
+use App\Exceptions\CredencialPjeRecusadaException;
 use App\Exceptions\MNIException;
-use App\Jobs\BaixarDocumentoMNIJob;
+use App\Exceptions\ProcessoNaoEncontradoNoTribunalException;
 use App\Models\ProcessoDocumento;
 use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
 use Carbon\Carbon;
@@ -18,19 +19,39 @@ class SalvarDocumentoProcessoService
     public function execute($processo, $documentos, $login_pje = null, $senha_pje = null, bool $baixar_binarios = true)
     {
         $documentos = is_array($documentos) ? $documentos : [$documentos];
+        $paraBaixar = [];
 
         foreach ($documentos as $documento) {
 
-            $this->salvarDocumento($processo, $documento, $login_pje, $senha_pje, $baixar_binarios);
+            $paraBaixar[] = $this->salvarDocumento($processo, $documento, $login_pje, $senha_pje, $baixar_binarios);
             if (isset($documento->documentoVinculado)) {
                 $documentoVinculado = is_array($documento->documentoVinculado) ? $documento->documentoVinculado : [$documento->documentoVinculado];
                 foreach ($documentoVinculado as $documentoVinculado) {
-                    $this->salvarDocumento($processo, $documentoVinculado, $login_pje, $senha_pje, $baixar_binarios);
+                    $paraBaixar[] = $this->salvarDocumento($processo, $documentoVinculado, $login_pje, $senha_pje, $baixar_binarios);
                 }
             }
         }
+
+        if (!$baixar_binarios) {
+            return;
+        }
+
+        $paraBaixar = array_filter(
+            $paraBaixar,
+            fn (ProcessoDocumento $processoDocumento) => $processoDocumento->status != ProcessoDocumento::STATUS_BAIXADO
+        );
+
+        // Um despacho só, depois do loop: os documentos do processo (inclusive
+        // os vinculados) precisam estar juntos para sair em lotes de até T.
+        app(EnfileirarDownloadDocumentosService::class)->enfileirar($paraBaixar, $login_pje, $senha_pje);
     }
 
+    /**
+     * Persiste o documento sem enfileirar download: quem despacha é o
+     * execute(), em lote, depois de salvar todos os documentos do processo.
+     *
+     * @return ProcessoDocumento
+     */
     public function salvarDocumento($processo, $documento, $login_pje = null, $senha_pje = null, bool $baixar_binarios = true)
     {
         $processoDocumento = ProcessoDocumento::updateOrCreate(
@@ -52,9 +73,7 @@ class SalvarDocumentoProcessoService
             ]
         );
 
-        if ($baixar_binarios && $processoDocumento->status != ProcessoDocumento::STATUS_BAIXADO) {
-            BaixarDocumentoMNIJob::dispatch($processoDocumento, $login_pje, $senha_pje)->onQueue('mni-download');
-        }
+        return $processoDocumento;
     }
 
     private function extrairOutroParametro($documento, $nome)
@@ -91,7 +110,15 @@ class SalvarDocumentoProcessoService
         // Verifica se o documento já está baixado e existe no S3
         if ($documento->status == ProcessoDocumento::STATUS_BAIXADO && Storage::disk('s3')->exists($documento->path)) {
             if ($documento->mimetype == 'text/html' && !$documento->temConteudoHtml()) {
-                $this->downloadHTML($documento);
+                // A reconsulta usa a credencial do tribunal, não o par da
+                // requisição: a recusa ou o "não encontrado" dela não pode
+                // chegar ao cliente como código estável. Mesma mensagem, sem
+                // a exceção classificada na cadeia de previous.
+                try {
+                    $this->downloadHTML($documento);
+                } catch (\Exception $e) {
+                    throw new \Exception($e->getMessage());
+                }
             }
 
             return ProcessoDocumento::find($documento->id);
@@ -148,35 +175,97 @@ class SalvarDocumentoProcessoService
         $documento->save();
     }
 
+    /**
+     * Ponto único de marcação de erro do download: o caminho em lote conta
+     * exatamente 1 log `error` por documento marcado, então quem marca por
+     * aqui não deve logar o mesmo erro de novo. O motivo vem de mensagens de
+     * exceção; nunca passar credenciais nem o request SOAP.
+     */
+    public function marcarComoErro(ProcessoDocumento $documento, string $motivo, bool $incrementarTentativa = true): void
+    {
+        $documento->status = ProcessoDocumento::STATUS_ERRO;
+
+        if ($incrementarTentativa) {
+            $documento->tentativas_download = (int) $documento->tentativas_download + 1;
+        }
+
+        $documento->save();
+
+        Log::error("[ProcessoDocumento:{$documento->id}] download do documento marcado como erro", [
+            'id_documento' => $documento->id_documento,
+            'motivo' => $motivo,
+        ]);
+    }
+
+    /**
+     * Grava no S3 o conteúdo de um documento já obtido do MNI (normalizado
+     * em base64), roteando pelo mimetype persistido. Separado da consulta
+     * para que o download em lote grave sem uma chamada MNI por documento.
+     *
+     * Não marca status nem loga erro: a falha sobe como exceção para o
+     * chamador decidir (no lote, vira marcarComoErro).
+     *
+     * @return string chave S3 principal, que vai para `path`
+     */
+    public function salvarConteudo(ProcessoDocumento $documento, object $documentoMni): string
+    {
+        $mimetype = (string) $documento->mimetype;
+
+        // Vídeo continua no BaixarDocumentoMNIJob + script bash, que lê o
+        // binário direto do MNI; aqui ele nunca deveria chegar.
+        if (in_array($mimetype, ['video/mp4', 'video/quicktime'], true)) {
+            throw new \InvalidArgumentException("Vídeo ({$mimetype}) não é gravado por salvarConteudo: segue o download por documento");
+        }
+
+        if ($mimetype == 'text/html') {
+            return $this->salvarConteudoHtml($documento, $documentoMni);
+        }
+
+        if ($mimetype == 'application/pdf') {
+            return $this->salvarConteudoPdf($documento, $documentoMni);
+        }
+
+        if (str_starts_with($mimetype, 'audio/')) {
+            return $this->salvarConteudoAudio($documento, $documentoMni);
+        }
+
+        return $this->salvarConteudoOutros($documento, $documentoMni);
+    }
+
     public function downloadHTML($documento, $login_pje = null, $senha_pje = null)
     {
         try {
             $documentoMNI = $this->consultarDocumento($documento, $login_pje, $senha_pje);
 
-            if (empty($documentoMNI->conteudo)) {
-                throw new \Exception('Conteúdo do documento HTML está vazio');
-            }
-
-            $conteudoDecodificado = base64_decode($documentoMNI->conteudo);
-            if ($conteudoDecodificado === false) {
-                throw new \Exception('Falha ao decodificar o conteúdo base64 do HTML');
-            }
-
-            $pdf = Pdf::loadHTML($conteudoDecodificado);
-            $pasta = "documentos-processos";
-            $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".pdf";
-            $filenameHtml = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".html";
-
-            $this->putComRetry($filename, $pdf->output(), 'PDF');
-            $this->putComRetry($filenameHtml, $conteudoDecodificado, 'HTML');
-
-            $documento->path_html = $filenameHtml;
-            $documento->save();
-
-            return $filename;
+            return $this->salvarConteudoHtml($documento, $documentoMNI);
         } catch (\Exception $e) {
-            throw new \Exception('Erro ao processar documento HTML: ' . $e->getMessage());
+            throw new \Exception('Erro ao processar documento HTML: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    public function salvarConteudoHtml($documento, $documentoMNI): string
+    {
+        if (empty($documentoMNI->conteudo)) {
+            throw new \Exception('Conteúdo do documento HTML está vazio');
+        }
+
+        $conteudoDecodificado = base64_decode($documentoMNI->conteudo);
+        if ($conteudoDecodificado === false) {
+            throw new \Exception('Falha ao decodificar o conteúdo base64 do HTML');
+        }
+
+        $pdf = Pdf::loadHTML($conteudoDecodificado);
+        $pasta = "documentos-processos";
+        $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".pdf";
+        $filenameHtml = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".html";
+
+        $this->putComRetry($filename, $pdf->output(), 'PDF');
+        $this->putComRetry($filenameHtml, $conteudoDecodificado, 'HTML');
+
+        $documento->path_html = $filenameHtml;
+        $documento->save();
+
+        return $filename;
     }
 
     private function putComRetry(string $path, string $conteudo, string $rotulo): void
@@ -237,26 +326,31 @@ class SalvarDocumentoProcessoService
         try {
             $documentoMNI = $this->consultarDocumento($documento, $login_pje, $senha_pje);
 
-            if (empty($documentoMNI->conteudo)) {
-                throw new \Exception('Conteúdo do PDF está vazio');
-            }
-
-            $conteudoDecodificado = base64_decode($documentoMNI->conteudo);
-            if ($conteudoDecodificado === false) {
-                throw new \Exception('Falha ao decodificar o conteúdo base64 do PDF');
-            }
-
-            $pasta = "documentos-processos";
-            $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".pdf";
-
-            if (!Storage::disk('s3')->put($filename, $conteudoDecodificado)) {
-                throw new \Exception('Erro ao salvar o PDF no S3');
-            }
-
-            return $filename;
+            return $this->salvarConteudoPdf($documento, $documentoMNI);
         } catch (\Exception $e) {
-            throw new \Exception('Erro ao processar documento PDF: ' . $e->getMessage());
+            throw new \Exception('Erro ao processar documento PDF: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    public function salvarConteudoPdf($documento, $documentoMNI): string
+    {
+        if (empty($documentoMNI->conteudo)) {
+            throw new \Exception('Conteúdo do PDF está vazio');
+        }
+
+        $conteudoDecodificado = base64_decode($documentoMNI->conteudo);
+        if ($conteudoDecodificado === false) {
+            throw new \Exception('Falha ao decodificar o conteúdo base64 do PDF');
+        }
+
+        $pasta = "documentos-processos";
+        $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . ".pdf";
+
+        if (!Storage::disk('s3')->put($filename, $conteudoDecodificado)) {
+            throw new \Exception('Erro ao salvar o PDF no S3');
+        }
+
+        return $filename;
     }
 
     public function downloadOutros($documento, $login_pje = null, $senha_pje = null)
@@ -264,27 +358,32 @@ class SalvarDocumentoProcessoService
         try {
             $documentoMNI = $this->consultarDocumento($documento, $login_pje, $senha_pje);
 
-            if (empty($documentoMNI->conteudo)) {
-                throw new \Exception('Conteúdo do documento está vazio');
-            }
-
-            $conteudoDecodificado = base64_decode($documentoMNI->conteudo);
-            if ($conteudoDecodificado === false) {
-                throw new \Exception('Falha ao decodificar o conteúdo base64');
-            }
-
-            $pasta = "documentos-processos";
-            $extensao = $this->getFileExtension($documento->mimetype);
-            $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . "." . $extensao;
-
-            if (!Storage::disk('s3')->put($filename, $conteudoDecodificado)) {
-                throw new \Exception('Erro ao salvar o documento no S3');
-            }
-
-            return $filename;
+            return $this->salvarConteudoOutros($documento, $documentoMNI);
         } catch (\Exception $e) {
-            throw new \Exception('Erro ao processar documento: ' . $e->getMessage());
+            throw new \Exception('Erro ao processar documento: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    public function salvarConteudoOutros($documento, $documentoMNI): string
+    {
+        if (empty($documentoMNI->conteudo)) {
+            throw new \Exception('Conteúdo do documento está vazio');
+        }
+
+        $conteudoDecodificado = base64_decode($documentoMNI->conteudo);
+        if ($conteudoDecodificado === false) {
+            throw new \Exception('Falha ao decodificar o conteúdo base64');
+        }
+
+        $pasta = "documentos-processos";
+        $extensao = $this->getFileExtension($documento->mimetype);
+        $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . "." . $extensao;
+
+        if (!Storage::disk('s3')->put($filename, $conteudoDecodificado)) {
+            throw new \Exception('Erro ao salvar o documento no S3');
+        }
+
+        return $filename;
     }
 
     public function getFileExtension($mimetype)
@@ -342,6 +441,15 @@ class SalvarDocumentoProcessoService
                 $login_pje,
                 $senha_pje
             );
+        } catch (CredencialPjeRecusadaException|ProcessoNaoEncontradoNoTribunalException $e) {
+            Log::error('Erro MNI ao consultar documento', [
+                'documento_id' => $documento->id_documento ?? 'N/A',
+                'error' => $e->getError(),
+                'code' => $e->getCode()
+            ]);
+            // Sem re-embrulhar: o catch de MNIException abaixo apagaria o tipo
+            // que a camada HTTP usa para responder com código estável.
+            throw $e;
         } catch (MNIException $e) {
             Log::error('Erro MNI ao consultar documento', [
                 'documento_id' => $documento->id_documento ?? 'N/A',
@@ -625,78 +733,83 @@ class SalvarDocumentoProcessoService
         try {
             $documentoMNI = $this->consultarDocumento($documento, $login_pje, $senha_pje);
 
-            if (empty($documentoMNI->conteudo)) {
-                throw new \Exception('Conteúdo do áudio está vazio');
-            }
-
-            // O conteúdo pode vir como referência XOP ou diretamente
-            $conteudoDocumento = null;
-
-            // Primeiro, tentar decodificar como base64 (conteúdo já processado pelo XOP)
-            $conteudoDecodificado = base64_decode($documentoMNI->conteudo, true);
-            if ($conteudoDecodificado !== false) {
-                // Conteúdo está em base64, usar o decodificado
-                $conteudoDocumento = $conteudoDecodificado;
-                Log::info('Audio: Conteúdo decodificado de base64', ['size' => strlen($conteudoDocumento)]);
-            } else {
-                // Conteúdo não está em base64, usar direto
-                $conteudoDocumento = $documentoMNI->conteudo;
-                Log::info('Audio: Conteúdo usado diretamente', ['size' => strlen($conteudoDocumento)]);
-            }
-
-            if (empty($conteudoDocumento)) {
-                throw new \Exception('Não foi possível extrair o conteúdo do áudio');
-            }
-
-            // Verificar se o arquivo começa com assinatura de áudio válida
-            $signature = substr($conteudoDocumento, 0, 12);
-            $signatureHex = bin2hex($signature);
-
-            // Assinaturas válidas para diferentes formatos de áudio
-            $validSignatures = [
-                'fffb', // MP3
-                'fff3', // MP3
-                'fff2', // MP3
-                '4944', // ID3 tag
-                '5249', // RIFF (WAV)
-                '664c', // FLAC
-                '4f67', // OGG
-            ];
-            $isValidAudio = false;
-
-            foreach ($validSignatures as $validSig) {
-                if (strpos(strtolower($signatureHex), $validSig) !== false) {
-                    $isValidAudio = true;
-                    break;
-                }
-            }
-
-            if (!$isValidAudio) {
-                Log::warning('Arquivo de áudio pode estar corrompido. Assinatura: ' . $signatureHex);
-            } else {
-                Log::info('Arquivo de áudio com assinatura válida: ' . $signatureHex);
-            }
-
-            $pasta = "documentos-processos";
-            $extensao = $this->getFileExtension($documento->mimetype);
-            $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . "." . $extensao;
-
-            if (!Storage::disk('s3')->put($filename, $conteudoDocumento)) {
-                throw new \Exception('Erro ao salvar o áudio no S3');
-            }
-
-            Log::info('Áudio salvo com sucesso', [
-                'filename' => $filename,
-                'mimetype' => $documento->mimetype,
-                'size' => strlen($conteudoDocumento),
-                'signature' => $signatureHex,
-                'valid' => $isValidAudio
-            ]);
-
-            return $filename;
+            return $this->salvarConteudoAudio($documento, $documentoMNI);
         } catch (\Exception $e) {
-            throw new \Exception('Erro ao processar documento de áudio: ' . $e->getMessage());
+            throw new \Exception('Erro ao processar documento de áudio: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    public function salvarConteudoAudio($documento, $documentoMNI): string
+    {
+        if (empty($documentoMNI->conteudo)) {
+            throw new \Exception('Conteúdo do áudio está vazio');
+        }
+
+        // O conteúdo pode vir como referência XOP ou diretamente
+        $conteudoDocumento = null;
+
+        // Primeiro, tentar decodificar como base64 (conteúdo já processado pelo XOP)
+        $conteudoDecodificado = base64_decode($documentoMNI->conteudo, true);
+        if ($conteudoDecodificado !== false) {
+            // Conteúdo está em base64, usar o decodificado
+            $conteudoDocumento = $conteudoDecodificado;
+            Log::info('Audio: Conteúdo decodificado de base64', ['size' => strlen($conteudoDocumento)]);
+        } else {
+            // Conteúdo não está em base64, usar direto
+            $conteudoDocumento = $documentoMNI->conteudo;
+            Log::info('Audio: Conteúdo usado diretamente', ['size' => strlen($conteudoDocumento)]);
+        }
+
+        if (empty($conteudoDocumento)) {
+            throw new \Exception('Não foi possível extrair o conteúdo do áudio');
+        }
+
+        // Verificar se o arquivo começa com assinatura de áudio válida
+        $signature = substr($conteudoDocumento, 0, 12);
+        $signatureHex = bin2hex($signature);
+
+        // Assinaturas válidas para diferentes formatos de áudio
+        $validSignatures = [
+            'fffb', // MP3
+            'fff3', // MP3
+            'fff2', // MP3
+            '4944', // ID3 tag
+            '5249', // RIFF (WAV)
+            '664c', // FLAC
+            '4f67', // OGG
+        ];
+        $isValidAudio = false;
+
+        foreach ($validSignatures as $validSig) {
+            if (strpos(strtolower($signatureHex), $validSig) !== false) {
+                $isValidAudio = true;
+                break;
+            }
+        }
+
+        if (!$isValidAudio) {
+            Log::warning('Arquivo de áudio pode estar corrompido. Assinatura: ' . $signatureHex);
+        } else {
+            Log::info('Arquivo de áudio com assinatura válida: ' . $signatureHex);
+        }
+
+        $pasta = "documentos-processos";
+        $extensao = $this->getFileExtension($documento->mimetype);
+        $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . "." . $extensao;
+
+        if (!Storage::disk('s3')->put($filename, $conteudoDocumento)) {
+            throw new \Exception('Erro ao salvar o áudio no S3');
+        }
+
+        Log::info('Áudio salvo com sucesso', [
+            'filename' => $filename,
+            'mimetype' => $documento->mimetype,
+            'size' => strlen($conteudoDocumento),
+            'signature' => $signatureHex,
+            'valid' => $isValidAudio
+        ]);
+
+        return $filename;
     }
 
     /**

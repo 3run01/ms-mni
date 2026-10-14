@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Exceptions\MNIException;
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\InjectCredenciaisPjePadrao;
 use App\Http\Resources\Processo\ConsultarProcessoApiComunicacaoPJeResource;
+use App\Http\Responses\ErroComCodigo;
 use App\Jobs\BaixarProcessoMNIJob;
 use App\Models\Processo;
 use App\Models\Tribunal;
@@ -107,6 +109,15 @@ class ConsultarProcessoController extends Controller
 
             return response()->json($processo);
         } catch (MNIException $e) {
+            $classificada = ErroComCodigo::classificar(
+                $e,
+                (bool) $request->attributes->get(InjectCredenciaisPjePadrao::ATRIBUTO_PAR_DO_CLIENTE, false)
+            );
+
+            if ($classificada) {
+                return ErroComCodigo::resposta($classificada);
+            }
+
             return response()->json(['error' => $e->getError(), 'line' => $e->getLine(), 'file' => $e->getFile()], $e->getCode() > 0 ? $e->getCode() : 500);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage(), 'line' => $e->getLine(), 'file' => $e->getFile()], $e->getCode() > 0 ? $e->getCode() : 500);

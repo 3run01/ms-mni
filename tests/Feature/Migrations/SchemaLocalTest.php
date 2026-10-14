@@ -18,7 +18,7 @@ it('tribunais existe no default com o schema canônico', function () {
     expect(Schema::hasTable('tribunais'))->toBeTrue();
 
     foreach ([
-        'id', 'uuid', 'nome', 'login', 'password',
+        'id', 'uuid', 'nome', 'sigla', 'grau', 'login', 'password',
         'url_webservice_mni', 'url_webservice_mni_complementar',
         'url_webservice_mni_consultar_processo', 'url_webservice_mni_criminal',
         'url_consulta_pje', 'url_recuperar_senha_tribunal', 'tipo', 'ativo',

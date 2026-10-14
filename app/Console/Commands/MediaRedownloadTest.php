@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\ProcessoDocumento;
-use App\Jobs\BaixarDocumentoMNIJob;
+use App\Services\Processo\EnfileirarDownloadDocumentosService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 
@@ -65,6 +65,7 @@ class MediaRedownloadTest extends Command
         $removidos = 0;
         $erros = 0;
         $requeued = 0;
+        $paraEnfileirar = [];
 
         foreach ($documentos as $documento) {
             try {
@@ -89,10 +90,7 @@ class MediaRedownloadTest extends Command
                 ]);
                 $this->info("  ✅ Status atualizado para PENDENTE");
 
-                // Enfileirar para redownload
-                BaixarDocumentoMNIJob::dispatch($documento)->onQueue('mni-download');
-                $requeued++;
-                $this->info("  ✅ Job enfileirado para redownload");
+                $paraEnfileirar[] = $documento;
             } catch (\Exception $e) {
                 $erros++;
                 $this->error("  ❌ Erro: " . $e->getMessage());
@@ -102,10 +100,28 @@ class MediaRedownloadTest extends Command
             $this->line('');
         }
 
+        // Áudio vai em lotes por processo; cada vídeo segue com 1 BaixarDocumentoMNIJob.
+        $resumo = ['lotes' => 0, 'documentos_em_lote' => 0, 'videos' => 0, 'ignorados_trava' => 0];
+
+        try {
+            $resumo = app(EnfileirarDownloadDocumentosService::class)->enfileirar($paraEnfileirar);
+            $requeued = $resumo['documentos_em_lote'] + $resumo['videos'];
+            $this->info("✅ Redownload enfileirado: {$resumo['lotes']} lotes ({$resumo['documentos_em_lote']} documentos) e {$resumo['videos']} vídeos");
+        } catch (\Throwable $e) {
+            // Sem o resumo não dá para saber quais documentos ficaram com job:
+            // todos os atualizados contam como erro.
+            $erros += count($paraEnfileirar);
+            $this->error("❌ Erro ao enfileirar o redownload: " . $e->getMessage());
+            Log::error('Erro ao enfileirar o redownload de teste: ' . $e->getMessage());
+        }
+
         $this->info('Teste concluído!');
         $this->info("Total processado: {$total}");
         $this->info("Arquivos removidos do S3: {$removidos}");
         $this->info("Documentos enfileirados para redownload: {$requeued}");
+        if ($resumo['ignorados_trava'] > 0) {
+            $this->comment("Já em lote em andamento: {$resumo['ignorados_trava']}");
+        }
 
         if ($erros > 0) {
             $this->error("Erros encontrados: {$erros}");

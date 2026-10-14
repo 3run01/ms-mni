@@ -2,8 +2,11 @@
 
 use App\Jobs\EnviarWebhookDownloadJob;
 use App\Models\ProcessoExportacao;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+
+uses(DatabaseTransactions::class);
 
 it('notifica callback do chamador com download_url presigned em concluido', function () {
     Storage::fake('s3');

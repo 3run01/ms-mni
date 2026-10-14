@@ -78,3 +78,57 @@ it('descarta a credencial parcial da requisicao quando nao ha par padrao', funct
     expect($request->input('login_pje'))->toBeNull()
         ->and($request->input('senha_pje'))->toBeNull();
 });
+
+// ---------- marca de origem do par (credenciais_pje_do_cliente) ----------
+
+it('marca o par como do cliente quando a requisicao envia as duas credenciais', function () {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
+    $request = passarPeloMiddlewarePje([
+        'login_pje' => 'req-login',
+        'senha_pje' => 'req-senha',
+    ]);
+
+    expect(InjectCredenciaisPjePadrao::ATRIBUTO_PAR_DO_CLIENTE)->toBe('credenciais_pje_do_cliente')
+        ->and($request->attributes->get(InjectCredenciaisPjePadrao::ATRIBUTO_PAR_DO_CLIENTE))->toBeTrue();
+});
+
+it('marca o par como do cliente mesmo quando ele e igual ao par padrao', function () {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
+    $request = passarPeloMiddlewarePje([
+        'login_pje' => 'env-login',
+        'senha_pje' => 'env-senha',
+    ]);
+
+    expect($request->attributes->get(InjectCredenciaisPjePadrao::ATRIBUTO_PAR_DO_CLIENTE))->toBeTrue();
+});
+
+it('nao marca como do cliente o par padrao injetado', function () {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
+    $request = passarPeloMiddlewarePje(['tribunal_id' => 1]);
+
+    expect($request->attributes->get(InjectCredenciaisPjePadrao::ATRIBUTO_PAR_DO_CLIENTE))->toBeFalse()
+        ->and($request->input('login_pje'))->toBe('env-login');
+});
+
+it('nao marca como do cliente o par incompleto da requisicao', function (array $query) {
+    definirCredenciaisPadrao('env-login', 'env-senha');
+
+    $request = passarPeloMiddlewarePje($query);
+
+    expect($request->attributes->get(InjectCredenciaisPjePadrao::ATRIBUTO_PAR_DO_CLIENTE))->toBeFalse();
+})->with([
+    'so o login' => [['login_pje' => 'req-login']],
+    'so a senha' => [['senha_pje' => 'req-senha']],
+    'senha vazia' => [['login_pje' => 'req-login', 'senha_pje' => '']],
+]);
+
+it('nao marca como do cliente quando nao ha par padrao configurado', function () {
+    $request = passarPeloMiddlewarePje(['login_pje' => 'req-login']);
+
+    expect($request->attributes->get(InjectCredenciaisPjePadrao::ATRIBUTO_PAR_DO_CLIENTE))->toBeFalse()
+        ->and($request->input('login_pje'))->toBeNull()
+        ->and($request->input('senha_pje'))->toBeNull();
+});

@@ -17,14 +17,23 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class InjectCredenciaisPjePadrao
 {
+    public const ATRIBUTO_PAR_DO_CLIENTE = 'credenciais_pje_do_cliente';
+
     /**
      * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
      */
     public function handle(Request $request, Closure $next): Response
     {
+        // depois do merge, login_pje/senha_pje não dizem mais de onde vieram;
+        // a marca deixa o controller responder 403 só quando o tribunal
+        // recusou o par enviado pelo cliente, nunca o par padrão.
         if ($request->filled('login_pje') && $request->filled('senha_pje')) {
+            $request->attributes->set(self::ATRIBUTO_PAR_DO_CLIENTE, true);
+
             return $next($request);
         }
+
+        $request->attributes->set(self::ATRIBUTO_PAR_DO_CLIENTE, false);
 
         $login = config('pje.credenciais_padrao.login');
         $senha = config('pje.credenciais_padrao.senha');

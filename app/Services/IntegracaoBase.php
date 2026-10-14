@@ -59,6 +59,29 @@ class IntegracaoBase
         return $retorno;
     }
 
+    /**
+     * Diz se o WSDL expõe a operação, sem invocá-la: chamar uma operação
+     * inexistente no SoapClient vira SoapFault, que não se distingue de falha
+     * de transporte.
+     *
+     * O nome casa exato (`consultarProcesso` não casa com `consultarProcessos`
+     * e vice-versa). Falha ao carregar o WSDL propaga para o chamador.
+     */
+    public function possuiOperacao(string $operacao): bool
+    {
+        $this->initiateSoap();
+
+        $padrao = '/\s' . preg_quote($operacao, '/') . '\(/';
+
+        foreach ($this->soap->__getFunctions() ?? [] as $assinatura) {
+            if (preg_match($padrao, $assinatura)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function getLastRequest()
     {
         return $this->lastRequest;

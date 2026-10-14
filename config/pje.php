@@ -37,4 +37,27 @@ return [
         'bloqueio_despacho_minutos' => 120,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Download de documentos em lote
+    |--------------------------------------------------------------------------
+    |
+    | Um job baixa até `tamanho_lote` documentos do mesmo processo com uma
+    | chamada `consultarProcessos` por página, em vez de uma chamada por
+    | documento — é isso que tira a carga do MNI do tribunal. Reduzir o lote
+    | é a saída sem deploy quando o job estoura memória ou timeout do
+    | supervisor `mni-download` (lotes com áudio são o caso conhecido).
+    |
+    | `max_paginas` é o teto de páginas lidas por execução. Vazio, vale
+    | ceil(tamanho_lote / tamanhoPagina) + 1; a página extra cobre o
+    | tribunal que pagina por processo e não por documento. Valores
+    | inválidos voltam ao padrão em ParametrosDownloadEmLote.
+    |
+    */
+
+    'download_documentos' => [
+        'tamanho_lote' => env('PJE_DOWNLOAD_TAMANHO_LOTE', 20),
+        'max_paginas' => env('PJE_DOWNLOAD_MAX_PAGINAS'),
+    ],
+
 ];

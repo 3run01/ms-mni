@@ -40,7 +40,8 @@ class SoapClientMNI extends SoapClient
         parent::__construct($wsdl, $options);
     }
 
-    public function __doRequest($request, $location, $action, $version, $one_way = 0)
+    // Assinatura do PHP 8.5 ($uriParserClass): sem ela a classe nem carrega (fatal).
+    public function __doRequest($request, $location, $action, $version, $one_way = 0, ?string $uriParserClass = null): ?string
     {
         $this->lastRequest = $request;
 
@@ -52,7 +53,7 @@ class SoapClientMNI extends SoapClient
         //     return Cache::get($cacheKey);
         // }
 
-        $response = parent::__doRequest($request, $location, $action, $version, $one_way);
+        $response = parent::__doRequest($request, $location, $action, $version, $one_way, $uriParserClass);
         $processedResponse = $this->process($response);
 
         // Salva no cache

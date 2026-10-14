@@ -35,6 +35,7 @@ function criarProcessoComDocParaController(string $numero, int $idDoc, string $m
         'tribunal_id' => 1,
         'valor_causa' => '0.00',
     ]);
+    // A exportação só considera documento já baixado e com path no S3
     ProcessoDocumento::create([
         'processo_id' => $processo->id,
         'id_documento' => $idDoc,
@@ -42,6 +43,8 @@ function criarProcessoComDocParaController(string $numero, int $idDoc, string $m
         'data_hora' => '2024-12-12 10:00:00',
         'tipo_documento' => '0',
         'descricao' => 'documento teste',
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => "docs/{$idDoc}.pdf",
     ]);
 }
 
@@ -106,6 +109,8 @@ it('retorna 404 quando nenhum documento disponível para os filtros', function (
     Queue::fake();
 
     criarProcessoComDocParaController('6001255-81.2024.8.03.0003', 1);
+    // O banco de teste é o de desenvolvimento: compara com o que já existia
+    $exportacoesAntes = ProcessoExportacao::count();
 
     $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
         ->postJson('/api/processo/download', payloadValidoExportacao([
@@ -113,7 +118,7 @@ it('retorna 404 quando nenhum documento disponível para os filtros', function (
         ]));
 
     $response->assertStatus(404);
-    expect(ProcessoExportacao::count())->toBe(0);
+    expect(ProcessoExportacao::count())->toBe($exportacoesAntes);
     Queue::assertNothingPushed();
 });
 
