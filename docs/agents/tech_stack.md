@@ -7,13 +7,13 @@
 ### Runtime and language
 
 - **Language**: PHP ^8.5 (`composer.json` `"php": "^8.5"`; images `dunglas/frankenphp:php8.5-bookworm` dev, `dunglas/frankenphp:1-php8.5-alpine` prod); TypeScript ^5.7 (locked 5.9.3, `tsconfig.json` strict) for the admin UI
-- **Framework**: Laravel ^13.0 (locked v13.35.0); Inertia.js v2 (`inertiajs/inertia-laravel` v2.0.28, `@inertiajs/react` 2.3.27) + React ^19 (locked 19.2.7)
+- **Framework**: Laravel ^13.0 (locked v13.38.0); Inertia.js v2 (`inertiajs/inertia-laravel` v2.0.28, `@inertiajs/react` 2.3.27) + React ^19 (locked 19.2.7)
 
 | Component | Version | Source |
 |---|---|---|
-| App server (prod) | Laravel Octane v2.21.0 on FrankenPHP | `docker/prod/8.4/Dockerfile`, `supervisord-coolify.conf` (`octane:start --server=frankenphp`) |
+| App server (prod) | Laravel Octane v2.22.0 on FrankenPHP | `docker/prod/8.4/Dockerfile`, `supervisord-coolify.conf` (`octane:start --server=frankenphp`) |
 | App server (dev) | `frankenphp php-server` | `docker/supervisord/supervisord.conf` |
-| Queues | Laravel Horizon v5.50.0 on Redis 7.4.0 (`phpredis`) | `config/horizon.php`, `docker-compose.yml` |
+| Queues | Laravel Horizon v5.50.1 on Redis 7.4.0 (`phpredis`) | `config/horizon.php`, `docker-compose.yml` |
 | Database | PostgreSQL 18 (`pgvector/pgvector:pg18`) | `docker-compose.yml`, `database/schema/pgsql-schema.sql` |
 | APM | Laravel Pulse v1.8.1 | `config/pulse.php`, `pulse:check` program |
 | Frontend build | Vite 5.4.11, `laravel-vite-plugin` 1.0.6, `@vitejs/plugin-react` 4.7.0 | `vite.config.js`, entry `resources/js/app.tsx` |
@@ -59,7 +59,7 @@
 | PDF | `barryvdh/laravel-dompdf` v3.1.2 + `setasign/fpdi` v2.6.8 (TCPDF-backed `setasign\Fpdi\Tcpdf\Fpdi`); Ghostscript `gs` binary |
 | Error tracking | `sentry/sentry-laravel` 4.28.0 |
 | Log shipping | `marvinlabs/laravel-discord-logger` v1.4.4 (channel `discord`); `opcodesio/log-viewer` v3.24.2 |
-| AI SDK | `laravel/ai` v1.2.0; `config/ai.php` + `agent_conversations` migration untracked; no usage under `app/` |
+| AI SDK | `laravel/ai` v1.3.0; `config/ai.php` + `agent_conversations` migration untracked; no usage under `app/` |
 
 ## Related documents
 
