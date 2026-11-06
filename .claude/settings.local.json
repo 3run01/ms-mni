@@ -15,7 +15,8 @@
       "Bash(docker compose *)",
       "Bash(git switch *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "ClaudeInChromeDomain(github.com)"
     ]
   }
 }

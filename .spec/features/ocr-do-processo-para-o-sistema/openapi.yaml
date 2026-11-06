@@ -1,0 +1,353 @@
+openapi: 3.1.0
+info:
+  title: API MNI/PJe — ms-mni (OCR do processo, DEP-03 a DEP-05)
+  version: "1.0.0"
+  description: |
+    Recorte do contrato do ms-mni para o OCR do processo, emitido pelo /plan
+    a partir da SPEC `ocr-do-processo-para-o-sistema` v1.7 (CT-01, CT-02,
+    CT-04). Fonte dos nós: cópia acordada
+    `~/Projetos/sistema-juridico-lorran/tests/Fixtures/Mni/openapi.yaml`
+    (`/processo/ocr` l. 423-499, `ocr_progresso` l. 771-799,
+    `SolicitacaoDeOcr` l. 835-866, `ProcessamentoDeOcr` l. 867-882,
+    `AvisoDeProgressoDoOcr` l. 883-909).
+
+    Estrutura igual à cópia acordada, exceto as divergências da SPEC:
+    - D-01: `POST /ocr/webhook` (CT-04) entra no contrato, porque toda rota de
+      `routes/api.php` é documentada. Só o workflow chama.
+    - D-02: o `422` sai com a mensagem do Laravel em inglês
+      (`APP_LOCALE=en`) e traz também `errors`.
+    - D-03: fora de `production`, `callback_url` aceita `http` e IP interno
+      para os hosts liberados (`CALLBACK_HOSTS_LIBERADOS`).
+    - D-04: o par só fica em jobs cifrados; um job que falha de vez guarda o
+      payload cifrado em `failed_jobs` e no Horizon por até 10.080 min.
+    - D-05: `callback_url` com `maxLength: 2048` (única diferença estrutural).
+    - D-06: `numero_processo` com máscara é aceito e normalizado.
+    - D-07: imagens vão ao OCR com a extensão do mimetype no `filename`.
+    - D-08: `com_erro` é "erro definitivo neste processamento"; um pedido que
+      abre processamento devolve os documentos com erro à fila.
+
+    O `docs/api/openapi.yaml` oficial recebe estes nós na task T20 (e o
+    `/ocr/webhook` na T15) do PLAN.md.
+servers:
+  - url: https://{host}/api
+    description: Servidor da aplicação
+    variables:
+      host:
+        default: localhost:8006
+security:
+  - ApiToken: []
+tags:
+  - name: Documentos
+    description: Consulta, download e OCR de documentos
+paths:
+  /processo/ocr:
+    post:
+      tags: [Documentos]
+      x-dependencia: DEP-03
+      summary: Baixar os documentos do processo e mandar ao OCR (assíncrono)
+      description: |
+        Garante o processo e a lista de documentos (consulta o MNI com o par
+        recebido, se preciso), enfileira o download e o OCR dos documentos
+        pendentes e responde `202` com as contagens. O progresso chega pelo
+        webhook `ocr_progresso` (DEP-05), no `callback_url`, com
+        `X-API-Token: {callback_token}`.
+
+        - **Chave processo + linha**: o processamento e o índice do OCR são
+          chaveados por `numero_processo` + `tribunal_id`, sem escritório. Um
+          OCR serve a todos os clientes que pedem o mesmo processo e linha.
+        - **Par do membro**: `login_pje`/`senha_pje` vão só no corpo, nunca na
+          URL. O par só fica cifrado, nos jobs da fila que baixa os documentos,
+          nunca em log nem em tabela do ms-mni. Um job que falha de vez guarda
+          o payload cifrado em `failed_jobs` e no Horizon por até 10.080 min
+          (D-04). O corpo desta requisição nunca vai para o log.
+        - **Fora do `InjectCredenciaisPjePadrao`**: como o grupo de
+          monitoramento, esta rota nunca usa o par padrão do servidor. Sem
+          `login_pje` e `senha_pje` preenchidos, responde `422`.
+        - **Carona**: um pedido do mesmo processo e linha com processamento em
+          andamento, de qualquer cliente, não enfileira de novo e não usa nem
+          guarda o par desse pedido. Responde `202` com a contagem atual e
+          passa a avisar também o novo `callback_url`, até o fim.
+        - **Incremental**: documento já lido pelo OCR não é lido de novo, venha
+          o pedido de qualquer cliente. Sem documento pendente, com erro ou
+          aguardando retorno, responde `202` com `situacao` = `concluido`. Um
+          pedido que abre processamento devolve à fila os documentos com erro
+          do processamento anterior (D-08).
+        - **Sem fan-out**: processa só a linha do `tribunal_id` recebido, nunca
+          as outras linhas do mesmo tribunal.
+        - **Formatos**: `total` conta os documentos em formato que o OCR lê
+          (PDF, HTML pelo PDF renderizado e as imagens aceitas); os demais
+          contam em `ignorados`.
+      security:
+        - ApiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SolicitacaoDeOcr' }
+      responses:
+        '202':
+          description: Pedido aceito (processamento novo, carona ou já concluído).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcessamentoDeOcr' }
+              example: { numero_processo: "12345674220268260100", tribunal_id: 12, total: 300, processados: 0, com_erro: 0, ignorados: 4, situacao: em_andamento }
+        '401': { $ref: '#/components/responses/Erro401' }
+        '403':
+          description: O tribunal recusou o par `login_pje`/`senha_pje`.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/ErroComCodigo' }
+                  - properties:
+                      codigo: { const: credencial_pje_recusada }
+              example: { codigo: credencial_pje_recusada, message: "Credencial PJe recusada pelo tribunal" }
+        '404':
+          description: O processo não existe no tribunal.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/ErroComCodigo' }
+                  - properties:
+                      codigo: { const: processo_nao_encontrado }
+              example: { codigo: processo_nao_encontrado, message: "Processo não encontrado no tribunal" }
+        '422':
+          description: |
+            Falha de validação, inclusive sem `login_pje` ou `senha_pje`
+            preenchidos (nunca usa o par padrão do servidor). A mensagem sai
+            em inglês (`APP_LOCALE=en`, D-02) e o corpo traz também `errors`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
+              example: { message: "The senha pje field is required.", errors: { senha_pje: ["The senha pje field is required."] } }
+        '500': { $ref: '#/components/responses/Erro500Generico' }
+  /ocr/webhook:
+    post:
+      tags: [Documentos]
+      x-dependencia: DEP-04
+      summary: Retorno do workflow "Jurídico OCR (Gemini)" (só o workflow chama)
+      description: |
+        Chamado pelo workflow do n8n (nós "Avisar o sistema" e "Avisar falha")
+        no `webhook_url` que o ms-mni mandou em cada envio de documento (D-01).
+
+        - Fora de `X-API-Token`: a credencial vai na query do `webhook_url`,
+          gerada pelo ms-mni por documento e válida por M = 60 min
+          (configurável) depois do envio, sempre ≥ A = 20 min (RF-11). O
+          workflow chama a URL como recebida; o formato da credencial é
+          interno do ms-mni.
+        - `success` marca o documento como lido (prevalece sobre o erro);
+          `error` marca o documento aguardando retorno como erro definitivo e
+          nunca rebaixa um documento já lido. Retorno repetido responde `200`
+          sem mudança.
+        - `job_id` desconhecido, de job cancelado pelo ms-mni ou de documento
+          devolvido à fila responde `404`, sem mudança.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetornoDoWorkflowOcr' }
+      responses:
+        '200':
+          description: Retorno aceito, inclusive o repetido e o `error` sobre um documento já lido.
+        '401':
+          description: Sem credencial válida no `webhook_url`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
+        '404':
+          description: "`job_id` desconhecido, cancelado pelo ms-mni ou de documento devolvido à fila."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
+        '422': { $ref: '#/components/responses/Erro422' }
+webhooks:
+  ocr_progresso:
+    post:
+      x-dependencia: DEP-05
+      summary: Progresso do OCR dos documentos do processo
+      description: |
+        Para cada pedido aceito em `POST /processo/ocr` (DEP-03), inclusive o
+        que pegou carona, o ms-mni faz `POST {callback_url}` com o header
+        `X-API-Token: {callback_token}` do próprio pedido. O `callback_url` é
+        usado como recebido, com a query (a assinatura do chamador vai nela).
+
+        - Um aviso a cada documento lido pelo OCR ou com erro definitivo, mais
+          um aviso final com `situacao` = `concluido` ou `falhou`.
+        - As contagens vão no corpo, porque o chamador não lê o banco do ms-mni.
+          `processados` + `com_erro` é o progresso sobre `total`, dentro do
+          mesmo processamento (D-08).
+        - `codigo` só vem com `situacao` = `falhou`: quando o tribunal recusa o
+          par no meio do processamento, `credencial_pje_recusada` vai só ao
+          pedido cujo par foi usado, e `credencial_de_outro_pedido_recusada`
+          aos pedidos de carona. Nas demais falhas, `codigo` não vem.
+
+        Retentativas: 5 tentativas, como o webhook `monitoramento`. Resposta
+        4xx é tratada como rejeição permanente (não retenta e encerra os avisos
+        daquele pedido); 5xx retenta.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AvisoDeProgressoDoOcr' }
+      responses:
+        '200': { description: Aviso recebido pelo chamador. }
+        '4XX': { description: Rejeição permanente; o ms-mni para de avisar este pedido. }
+components:
+  securitySchemes:
+    ApiToken:
+      type: apiKey
+      in: header
+      name: X-API-Token
+      description: Token de API emitido pelo ms-mni.
+  schemas:
+    ErroMensagem:
+      type: object
+      description: Erro simples com apenas mensagem.
+      properties:
+        message: { type: string, example: "Token inválido ou não fornecido" }
+      required: [message]
+    ErroComCodigo:
+      type: object
+      x-dependencia: DEP-01
+      description: |
+        Erro com código estável para o cliente decidir sem ler o texto:
+        - `credencial_pje_recusada` (`403`): o tribunal recusou o par
+          `login_pje`/`senha_pje`;
+        - `processo_nao_encontrado` (`404`): o processo não existe no tribunal.
+        `message` é só informativo e nunca contém a credencial.
+      properties:
+        codigo: { type: string, enum: [credencial_pje_recusada, processo_nao_encontrado] }
+        message: { type: string, example: "Credencial PJe recusada pelo tribunal" }
+      required: [codigo, message]
+    SolicitacaoDeOcr:
+      type: object
+      x-dependencia: DEP-03
+      description: Corpo de `POST /processo/ocr`. Todos os campos são obrigatórios.
+      required: [numero_processo, tribunal_id, login_pje, senha_pje, callback_url, callback_token]
+      properties:
+        numero_processo:
+          type: string
+          pattern: '^[0-9]{20}$'
+          description: "Os 20 dígitos do número CNJ. Com `tribunal_id`, é a chave do processamento e do índice, sem escritório. O servidor também aceita o número com máscara e o normaliza (D-06)."
+          example: "12345674220268260100"
+        tribunal_id:
+          type: integer
+          minimum: 1
+          description: "Linha do tribunal (tribunal ativo). Só esta linha é processada, sem fan-out."
+        login_pje:
+          type: string
+          minLength: 1
+          description: "Login do PJe; o par do membro; só no corpo, nunca na URL; só em job cifrado, nunca em log nem em tabela do ms-mni."
+        senha_pje:
+          type: string
+          minLength: 1
+          description: "Senha do PJe; o par do membro; só no corpo, nunca na URL; só em job cifrado, nunca em log nem em tabela do ms-mni."
+        callback_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: "URL https do aviso de progresso (webhook `ocr_progresso`), usada como recebida. Bloqueia IPs internos. Fora de `production`, aceita `http` e IP interno para os hosts liberados (D-03). Até 2.048 caracteres (D-05)."
+        callback_token:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: "Token reenviado no header `X-API-Token` de cada aviso."
+    ProcessamentoDeOcr:
+      type: object
+      x-dependencia: DEP-03
+      description: Situação do processamento do processo e linha no momento do pedido (`202` de `POST /processo/ocr`).
+      required: [numero_processo, tribunal_id, total, processados, com_erro, ignorados, situacao]
+      properties:
+        numero_processo: { type: string, pattern: '^[0-9]{20}$' }
+        tribunal_id: { type: integer, minimum: 1 }
+        total: { type: integer, minimum: 0, description: "Documentos em formato que o OCR lê." }
+        processados: { type: integer, minimum: 0, description: "Documentos já lidos pelo OCR, em qualquer processamento." }
+        com_erro: { type: integer, minimum: 0, description: "Documentos com erro definitivo no download ou no OCR neste processamento (D-08)." }
+        ignorados: { type: integer, minimum: 0, description: "Documentos em formato que o OCR não lê; ficam fora de `total`." }
+        situacao:
+          type: string
+          enum: [em_andamento, concluido]
+          description: "`concluido` quando não há documento pendente (tudo já lido, inclusive antes deste pedido)."
+    AvisoDeProgressoDoOcr:
+      type: object
+      x-dependencia: DEP-05
+      description: Corpo do webhook `ocr_progresso`.
+      required: [numero_processo, tribunal_id, total, processados, com_erro, ignorados, situacao]
+      properties:
+        numero_processo: { type: string, pattern: '^[0-9]{20}$' }
+        tribunal_id: { type: integer, minimum: 1 }
+        total: { type: integer, minimum: 0 }
+        processados: { type: integer, minimum: 0 }
+        com_erro: { type: integer, minimum: 0 }
+        ignorados: { type: integer, minimum: 0 }
+        situacao: { type: string, enum: [em_andamento, concluido, falhou] }
+        codigo:
+          type: string
+          enum: [credencial_pje_recusada, credencial_de_outro_pedido_recusada]
+          description: |
+            Só com `situacao` = `falhou`:
+            - `credencial_pje_recusada`: o tribunal recusou o par enviado neste
+              pedido;
+            - `credencial_de_outro_pedido_recusada`: o tribunal recusou o par de
+              outro pedido, no processamento em que este pegou carona.
+            Ausente nas demais falhas.
+      if: { required: [codigo] }
+      then:
+        properties:
+          situacao: { const: falhou }
+    RetornoDoWorkflowOcr:
+      x-dependencia: DEP-04
+      description: Corpo que o workflow manda ao `webhook_url` (nós "Avisar o sistema" e "Avisar falha").
+      oneOf:
+        - { $ref: '#/components/schemas/RetornoDoWorkflowOcrSucesso' }
+        - { $ref: '#/components/schemas/RetornoDoWorkflowOcrFalha' }
+    RetornoDoWorkflowOcrSucesso:
+      type: object
+      x-dependencia: DEP-04
+      required: [status, job_id]
+      properties:
+        status: { type: string, const: success }
+        job_id: { type: string, minLength: 1, description: "O `id` do `202` do envio (CT-03)." }
+        message: { type: string, example: "OCR + RAG processados com sucesso" }
+        bucket_destino: { type: [string, 'null'] }
+        path_destino: { type: [string, 'null'] }
+        indexed_chunks: { type: [integer, 'null'], minimum: 0 }
+    RetornoDoWorkflowOcrFalha:
+      type: object
+      x-dependencia: DEP-04
+      required: [status, job_id]
+      properties:
+        status: { type: string, const: error }
+        job_id: { type: string, minLength: 1, description: "O `id` do `202` do envio (CT-03)." }
+        message: { type: string, example: "Falha ao processar OCR+RAG" }
+        error_detail: { type: [string, 'null'] }
+        error: { type: [string, 'null'] }
+  responses:
+    Erro401:
+      description: Token inválido ou não fornecido.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErroMensagem' }
+          example: { message: "Token inválido ou não fornecido" }
+    Erro422:
+      description: Falha de validação.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+          example:
+            message: "The job id field is required."
+            errors: { job_id: ["The job id field is required."] }
+    Erro500Generico:
+      description: Erro interno.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErroMensagem' }

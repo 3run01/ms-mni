@@ -1,0 +1,255 @@
+openapi: 3.1.0
+info:
+  title: Workflow "Jurídico OCR (Gemini)" — interface consumida pelo ms-mni
+  version: "1.1.0"
+  description: |
+    Visão de cliente do ms-mni sobre o workflow do n8n
+    (`~/Projetos/sistema-juridico-lorran/docker/n8n/juridico-ocr.json`),
+    emitida pelo /plan a partir da SPEC `ocr-do-processo-para-o-sistema` v1.7
+    (CT-03, CT-05, CT-07 e o lado do workflow em CT-04). O provedor é o
+    workflow; este arquivo não é publicado no `docs/api/openapi.yaml` do
+    ms-mni. Serve de referência para `ClienteWorkflowOcr` (T11), o envio e a
+    consulta antes do reenvio (T16), o acompanhamento (T18) e os `Http::fake`
+    dos testes.
+
+    Verificado contra os nós "Receber documento" (`juridico-ocr/documents/process`),
+    "Validar pedido", "Responder 202", "Pedido invalido", "Consultar job"
+    (webhookId `juridico-ocr`, path `jobs/:job_id`), "Responder job",
+    "Job nao encontrado", "Excluir trechos" (webhookId `juridico-ocr`, path
+    `jobs/:job_id/chunks`), "Responder exclusao", "Avisar o sistema" e
+    "Avisar falha".
+
+    v1.1.0 (SPEC v1.7): o CT-05 passa a ser usado também antes de todo reenvio
+    de documento aguardando retorno com idade ≥ A (R5-1, R6-1 a R6-3, R7-1), e
+    o CT-07 também para job preso em `pending`/`running` com idade ≥ M. Os
+    corpos e status do workflow não mudaram.
+servers:
+  - url: '{base}'
+    description: Base do workflow (`services.n8n_ocr.url`).
+    variables:
+      base:
+        default: http://n8n:5678/webhook/juridico-ocr
+security:
+  - TokenDoWorkflow: []
+paths:
+  /documents/process:
+    post:
+      x-contrato: CT-03
+      operationId: enviarDocumentoAoOcr
+      summary: Envia um documento dos autos ao OCR
+      description: |
+        Uma fonte só (`url`), `filename` com extensão aceita, `metadata` de
+        documento dos autos (sem `escritorio_id`, com `numero_processo` de 20
+        dígitos e `tribunal_id` inteiro positivo). O workflow escolhe o MIME
+        pela extensão do `filename` (nó "Arquivo"). O ms-mni não manda
+        `file_base64`, `bucket_origem`, `path_origem`, `bucket_destino` nem
+        `path_destino`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EnvioDeDocumentoAoOcr' }
+      responses:
+        '202':
+          description: Job criado; o documento fica aguardando retorno.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobCriado' }
+        '422':
+          description: Pedido inválido; o ms-mni marca o documento com erro definitivo, sem nova tentativa.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroDoWorkflow' }
+        '5XX':
+          description: Falha transitória; o ms-mni tenta de novo e, esgotadas as tentativas, marca erro definitivo.
+  /jobs/{job_id}:
+    get:
+      x-contrato: CT-05
+      operationId: consultarJobDoOcr
+      summary: Situação de um job (fim por P e consulta antes do reenvio)
+      description: |
+        O ms-mni consulta em dois momentos, com regras diferentes:
+
+        - **Ao atingir P (RF-13 item 1)**, para todo documento aguardando
+          retorno: `success` vira processado; `failed`, `cancelled` ou `404`
+          viram erro definitivo; `pending` e `running` seguem aguardando.
+        - **Antes de reenviar um documento aguardando retorno com idade ≥ A**
+          (RF-18 item 3), na abertura ou no acompanhamento: `success` vira
+          processado, sem reenvio; `404`, `failed` ou `cancelled` levam ao
+          cancelamento (CT-07) e ao reenvio; `pending` ou `running` só levam a
+          cancelar e reenviar com idade ≥ M (60 min); com idade < M, o
+          documento segue aguardando e é consultado de novo na rodada seguinte.
+
+        Tempo esgotado, 5xx, falha de rede ou `status` fora do `enum`: nenhuma
+        mudança e nenhum reenvio; a consulta se repete na rodada seguinte.
+      parameters:
+        - { $ref: '#/components/parameters/JobId' }
+      responses:
+        '200':
+          description: Situação do job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobDoWorkflowOcr' }
+        '404':
+          description: Job inexistente. Em P, erro definitivo; antes do reenvio, cancela (CT-07) e reenvia.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroDoWorkflow' }
+  /jobs/{job_id}/chunks:
+    delete:
+      x-contrato: CT-07
+      operationId: cancelarJobDoOcr
+      summary: Cancela o job e apaga os trechos dele (antes de todo reenvio)
+      description: |
+        Cancela o job em `pending` ou `running` e apaga os trechos. Idempotente:
+        responde `200` também sem trechos ou sem job. O ms-mni chama antes de
+        todo reenvio de documento que já tem `job_id`: o `com_erro` devolvido
+        pela reabertura e o aguardando retorno com idade ≥ A cuja consulta
+        (CT-05) deu `404`, `failed` ou `cancelled`, ou segue em
+        `pending`/`running` com idade ≥ M. Qualquer outra resposta, tempo
+        esgotado ou falha de rede: o ms-mni não reenvia e tenta de novo.
+      parameters:
+        - { $ref: '#/components/parameters/JobId' }
+      responses:
+        '200':
+          description: Job cancelado (ou inexistente) e trechos apagados.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExclusaoDeTrechos' }
+webhooks:
+  retorno_do_job:
+    post:
+      x-contrato: CT-04
+      summary: O workflow chama o `webhook_url` do envio ao terminar o job
+      description: |
+        `POST {webhook_url}` sem header de autenticação e sem nova tentativa
+        (nós "Avisar o sistema" e "Avisar falha"). A credencial está na query
+        do `webhook_url`, gerada pelo ms-mni. O provedor deste lado é o
+        `POST /api/ocr/webhook` do ms-mni (ver `openapi.yaml` desta pasta).
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - { $ref: '#/components/schemas/RetornoDoWorkflowOcrSucesso' }
+                - { $ref: '#/components/schemas/RetornoDoWorkflowOcrFalha' }
+      responses:
+        '200': { description: Retorno aceito pelo ms-mni. }
+        '401': { description: Credencial do `webhook_url` inválida ou vencida. }
+        '404': { description: "`job_id` desconhecido para o ms-mni (inclusive job cancelado ou de documento devolvido à fila)." }
+        '422': { description: Corpo sem `job_id` ou com `status` fora de `success`/`error`. }
+components:
+  securitySchemes:
+    TokenDoWorkflow:
+      type: http
+      scheme: bearer
+      description: "`Authorization: Bearer {services.n8n_ocr.token}`, o mesmo nos três endpoints."
+  parameters:
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+      description: "O `id` devolvido no `202` de `/documents/process`."
+  schemas:
+    EnvioDeDocumentoAoOcr:
+      type: object
+      description: Corpo do envio (RF-11). Exatamente estas 5 chaves.
+      required: [url, filename, webhook_url, base_conhecimento, metadata]
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          format: uri
+          description: "Link temporário do S3 do objeto gravado (`path`), válido por pelo menos P = 25 min depois do envio."
+        filename:
+          type: string
+          pattern: '^[0-9]+\.(pdf|png|jpg|webp|tif|bmp|gif)$'
+          description: "`{id_documento}.pdf` para PDF e HTML; `{id_documento}.{png|jpg|webp|tif|bmp|gif}` para imagens, pela extensão do mimetype (D-07)."
+        webhook_url:
+          type: string
+          format: uri
+          description: "URL de volta ao ms-mni (`POST /api/ocr/webhook`), com a credencial na query, válida por M = 60 min (configurável) depois do envio, sempre ≥ A = 20 min (RF-11)."
+        base_conhecimento:
+          type: string
+          description: "Igual ao `SIM_OCR_BASE_CONHECIMENTO` do Sistema."
+        metadata: { $ref: '#/components/schemas/MetadataDocumentoDosAutos' }
+    MetadataDocumentoDosAutos:
+      type: object
+      description: "`metadata` de documento dos autos, sem `escritorio_id`."
+      required: [numero_processo, tribunal_id, numero_documento, tipo_documento, descricao, movimento, mimetype, data_juntada, nivel_sigilo]
+      additionalProperties: false
+      properties:
+        numero_processo: { type: string, pattern: '^[0-9]{20}$' }
+        tribunal_id: { type: integer, minimum: 1 }
+        numero_documento: { type: string, pattern: '^[0-9]+$', description: "O `id_documento`." }
+        tipo_documento: { type: [string, 'null'], description: "Descrição do `TipoDocumento` do código e do tribunal; `null` sem cadastro." }
+        descricao: { type: string }
+        movimento: { type: [string, 'null'] }
+        mimetype:
+          type: string
+          enum: [application/pdf, text/html, image/png, image/jpeg, image/webp, image/tiff, image/bmp, image/gif]
+        data_juntada:
+          type: [string, 'null']
+          format: date-time
+          description: "ISO-8601 com fuso (`toIso8601String()`); `null` sem data gravada."
+        nivel_sigilo: { type: integer, minimum: 0, description: "`null` gravado vai como 0." }
+    JobCriado:
+      type: object
+      description: Nó "Responder 202".
+      required: [id, status, error]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, const: pending }
+        error: { type: 'null' }
+    ErroDoWorkflow:
+      type: object
+      description: Nós "Pedido invalido" (`422`) e "Job nao encontrado" (`404`).
+      required: [detail]
+      properties:
+        detail: { type: string }
+    JobDoWorkflowOcr:
+      type: object
+      description: Nó "Responder job".
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status:
+          type: string
+          enum: [pending, running, success, failed, cancelled]
+          description: "`cancelled` também resulta do `DELETE` (CT-07). Com idade ≥ A, `cancelled` é tratado como `404` ou `failed` (R7-1)."
+        filename: { type: [string, 'null'] }
+        progress: { type: [integer, 'null'], minimum: 0, maximum: 100 }
+        progress_message: { type: [string, 'null'] }
+        error: { type: [string, 'null'] }
+        created_at: { type: [string, 'null'], format: date-time }
+        updated_at: { type: [string, 'null'], format: date-time }
+    ExclusaoDeTrechos:
+      type: object
+      description: Nó "Responder exclusao".
+      required: [job_id, deleted_chunks]
+      properties:
+        job_id: { type: string }
+        deleted_chunks: { type: integer, minimum: 0 }
+    RetornoDoWorkflowOcrSucesso:
+      type: object
+      description: Nó "Avisar o sistema".
+      required: [status, job_id]
+      properties:
+        status: { type: string, const: success }
+        job_id: { type: string, minLength: 1 }
+        message: { type: string }
+        bucket_destino: { type: [string, 'null'] }
+        path_destino: { type: [string, 'null'] }
+        indexed_chunks: { type: [integer, 'null'], minimum: 0 }
+    RetornoDoWorkflowOcrFalha:
+      type: object
+      description: Nó "Avisar falha".
+      required: [status, job_id]
+      properties:
+        status: { type: string, const: error }
+        job_id: { type: string, minLength: 1 }
+        message: { type: string }
+        error_detail: { type: [string, 'null'] }
+        error: { type: [string, 'null'] }
