@@ -138,7 +138,7 @@ X-API-Token: tk-test
 - 404 has two shapes (contract `oneOf`), told apart by `codigo`:
   - with `codigo`: `{"codigo": "processo_nao_encontrado", "message": "Processo não encontrado no tribunal"}` — the processo does not exist in the tribunal (processo query or binary download); returned on the first occurrence, no retries;
   - without `codigo`: `{"message": "Não foi possível obter o documento {id} do processo {numero} após 3 tentativas"}` — no link after 3 attempts without exception.
-- 403 `{"codigo": "credencial_pje_recusada", "message": "Credencial PJe recusada pelo tribunal"}` — client pair refused (processo query or binary download); no retries.
+- 403 `{"codigo": "credencial_pje_recusada", "message": "Credencial PJe recusada pelo tribunal"}` — client pair refused (processo query or binary download, including the legacy HTML re-fetch of a `text/html` `baixado` documento without `path_html`/`conteudo_html`, which uses the request pair); no retries.
 - Other `MNIException`/exceptions → 500 `{"message": "..."}`, unchanged (e.g. `Documento não encontrado`, `Erro ao processar documento PDF:`).
 - `GET /api/processo/documentos/listar` returns documento array; on MNI path each item gets `tipo` (`TipoDocumento` by `codigo` + tribunal).
 

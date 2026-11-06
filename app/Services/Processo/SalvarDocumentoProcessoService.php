@@ -110,15 +110,13 @@ class SalvarDocumentoProcessoService
         // Verifica se o documento já está baixado e existe no S3
         if ($documento->status == ProcessoDocumento::STATUS_BAIXADO && Storage::disk('s3')->exists($documento->path)) {
             if ($documento->mimetype == 'text/html' && !$documento->temConteudoHtml()) {
-                // A reconsulta usa a credencial do tribunal, não o par da
-                // requisição: a recusa ou o "não encontrado" dela não pode
-                // chegar ao cliente como código estável. Mesma mensagem, sem
-                // a exceção classificada na cadeia de previous.
-                try {
-                    $this->downloadHTML($documento);
-                } catch (\Exception $e) {
-                    throw new \Exception($e->getMessage());
-                }
+                // HTML legado (PDF no S3, sem o .html): a reconsulta usa o par
+                // da requisição e segue a tabela do DEP-01 dos outros downloads.
+                // O downloadHTML leva a falha do tribunal como previous, e a
+                // camada HTTP decide: recusa do par do cliente → 403, "não
+                // encontrado" → 404, recusa do par padrão → 500. Sem par, o
+                // ConsultarDocumentoService cai na credencial do tribunal.
+                $this->downloadHTML($documento, $login_pje, $senha_pje);
             }
 
             return ProcessoDocumento::find($documento->id);

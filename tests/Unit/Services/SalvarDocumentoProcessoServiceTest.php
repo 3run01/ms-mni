@@ -510,7 +510,11 @@ it('consultarDocumento continua re-embrulhando a MNIException comum', function (
         ->and($capturada->getCode())->toBe(500);
 });
 
-it('baixarDocumento de HTML legado mantém a mensagem e não leva a exceção classificada na cadeia', function (string $classe, string $texto) {
+// HTML legado: `baixado`, com o PDF no S3, sem `path_html` e sem `conteudo_html`.
+// A reconsulta usa o par da requisição e deixa a falha do tribunal como previous,
+// para a camada HTTP aplicar a tabela do DEP-01 (RF-01, NC-2).
+
+it('baixarDocumento de HTML legado chama downloadHTML com o par e propaga a falha sem cortar a cadeia', function (string $classe, string $texto) {
     Storage::fake('s3');
     $documento = criarDocumentoHtml([
         'id_documento' => 920008,
@@ -518,40 +522,51 @@ it('baixarDocumento de HTML legado mantém a mensagem e não leva a exceção cl
         'path' => 'documentos-processos/x/920008.pdf',
     ]);
     Storage::disk('s3')->put('documentos-processos/x/920008.pdf', 'pdf-fake');
-    $falha = new Exception('Erro ao processar documento HTML: ', 0, new $classe($texto, 500));
+    $classificada = new $classe($texto, 500);
+    $falha = new Exception('Erro ao processar documento HTML: ', 0, $classificada);
 
     $service = Mockery::mock(SalvarDocumentoProcessoService::class)->makePartial();
-    $service->shouldReceive('downloadHTML')->once()->with($documento)->andThrow($falha);
+    $service->shouldReceive('downloadHTML')->once()->with($documento, 'login-pje', 'senha-pje')->andThrow($falha);
 
     $capturada = falhaSalvarDocumento(fn () => $service->baixarDocumento($documento, 'login-pje', 'senha-pje'));
 
-    expect(get_class($capturada))->toBe(Exception::class)
+    expect($capturada)->toBe($falha)
         ->and($capturada->getMessage())->toBe('Erro ao processar documento HTML: ')
-        ->and($capturada->getPrevious())->toBeNull();
+        ->and($capturada->getPrevious())->toBe($classificada);
 })->with([
     'credencial recusada' => [CredencialPjeRecusadaException::class, LOGIN_RECUSADO_SALVAR_DOCUMENTO],
     'processo não encontrado' => [ProcessoNaoEncontradoNoTribunalException::class, PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO],
 ]);
 
-it('baixarDocumento de HTML legado reconsulta com a credencial do tribunal e corta a cadeia', function (string $texto) {
+it('baixarDocumento de HTML legado repassa o par e mantém a exceção classificada na cadeia', function (?string $login, ?string $senha, string $texto, string $classe, string $loginUsado, string $senhaUsada) {
     Storage::fake('s3');
     [, $documentos] = criarDocumentosLote([[
         'mimetype' => 'text/html',
         'status' => ProcessoDocumento::STATUS_BAIXADO,
         'path' => 'documentos-processos/x/legado.pdf',
     ]]);
+    $documento = $documentos->first();
     Storage::disk('s3')->put('documentos-processos/x/legado.pdf', 'pdf-fake');
     $registro = simularIntegracaoMni(fn () => (object) ['sucesso' => false, 'mensagem' => $texto]);
 
     $capturada = falhaSalvarDocumento(fn () => (new SalvarDocumentoProcessoService())
-        ->baixarDocumento($documentos->first(), 'login-pje', 'senha-pje'));
+        ->baixarDocumento($documento, $login, $senha));
 
     expect(get_class($capturada))->toBe(Exception::class)
         ->and($capturada->getMessage())->toBe('Erro ao processar documento HTML: ')
-        ->and($capturada->getPrevious())->toBeNull()
+        ->and(get_class($capturada->getPrevious()))->toBe($classe)
         ->and($registro->requisicoes)->toHaveCount(1)
-        ->and($registro->requisicoes[0]['parametros']['idConsultante'])->toBe('login-do-tribunal');
+        ->and($registro->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento)
+        ->and($registro->requisicoes[0]['parametros']['idConsultante'])->toBe($loginUsado)
+        ->and($registro->requisicoes[0]['parametros']['senhaConsultante'])->toBe($senhaUsada);
+
+    // a falha não grava nada: o documento segue baixado, sem path_html
+    expect($documento->fresh())
+        ->status->toBe(ProcessoDocumento::STATUS_BAIXADO)
+        ->path_html->toBeNull();
 })->with([
-    'loginFailed' => LOGIN_RECUSADO_SALVAR_DOCUMENTO,
-    'processo não encontrado' => PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO,
+    'par informado e credencial recusada' => ['{LOGIN}', '{SENHA}', LOGIN_RECUSADO_SALVAR_DOCUMENTO, CredencialPjeRecusadaException::class, '{LOGIN}', '{SENHA}'],
+    'par informado e processo não encontrado' => ['{LOGIN}', '{SENHA}', PROCESSO_NAO_ENCONTRADO_SALVAR_DOCUMENTO, ProcessoNaoEncontradoNoTribunalException::class, '{LOGIN}', '{SENHA}'],
+    // sem par, a recusa é da credencial do tribunal e não é classificada
+    'sem par e credencial do tribunal recusada' => [null, null, LOGIN_RECUSADO_SALVAR_DOCUMENTO, MNIException::class, 'login-do-tribunal', '{SENHA}'],
 ]);

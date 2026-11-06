@@ -446,8 +446,15 @@ it('visualizar PDF pendente com par do cliente responde 500 com a mensagem do wr
         ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe('senha-cliente');
 });
 
-it('visualizar HTML legado sem path_html nem conteudo_html responde 500 com a mensagem do wrapper quando a reconsulta pela credencial do tribunal falha', function (string $mensagem) {
-    fakeS3ComLinks();
+// HTML legado: `baixado`, com o PDF no S3, sem `path_html` e sem `conteudo_html`.
+// A reconsulta usa o par da requisição e segue a tabela do DEP-01 dos outros
+// downloads (RF-01, NC-2).
+
+/**
+ * @return array{0: Processo, 1: ProcessoDocumento}
+ */
+function criarHtmlLegadoVisualizarDocumento(): array
+{
     [$processo, $documentos] = criarDocumentosLote([[
         'mimetype' => 'text/html',
         'status' => ProcessoDocumento::STATUS_BAIXADO,
@@ -455,22 +462,65 @@ it('visualizar HTML legado sem path_html nem conteudo_html responde 500 com a me
     ]]);
     $documento = $documentos->first();
     Storage::disk('s3')->put($documento->path, 'pdf-fake');
-    $simulador = simularIntegracaoMni(semSucessoVisualizarDocumentoErroMni($mensagem));
 
+    return [$processo, $documento];
+}
+
+/**
+ * Recusa do par nas três formas cruas. Fica numa função, e não no dataset,
+ * porque o Pest executa closures do dataset antes do teste.
+ */
+function recusaDoParVisualizarDocumento(string $forma): Closure
+{
+    return match ($forma) {
+        'sucesso_false' => semSucessoVisualizarDocumentoErroMni(LOGIN_RECUSADO_VISUALIZAR_DOCUMENTO_ERRO_MNI),
+        // como o recibo `sucesso = false` que IntegracaoBase::makeSoapRequest lança
+        'excecao_do_recibo' => fn () => throw new Exception(LOGIN_RECUSADO_VISUALIZAR_DOCUMENTO_ERRO_MNI, 0),
+        'soap_fault' => fn () => throw new SoapFault('Server', LOGIN_RECUSADO_VISUALIZAR_DOCUMENTO_ERRO_MNI),
+    };
+}
+
+dataset('formas_da_recusa_visualizar_documento', [
+    'sucesso false' => 'sucesso_false',
+    'exceção do recibo' => 'excecao_do_recibo',
+    'SoapFault' => 'soap_fault',
+]);
+
+it('visualizar HTML legado com o par padrão recusado responde 500 sem codigo', function (string $forma) {
+    fakeS3ComLinks();
+    definirCredenciaisPadrao('env-login', 'env-senha');
+    [$processo, $documento] = criarHtmlLegadoVisualizarDocumento();
+    $simulador = simularIntegracaoMni(recusaDoParVisualizarDocumento($forma));
+
+    // sem o par na query: a reconsulta sai com o par padrão injetado
     $this->withHeaders(['X-API-Token' => 'tk-test'])
-        ->getJson(urlVisualizarDocumentoErroMni($processo->tribunal_id, $processo->numero_processo, $documento->id_documento, ['login_pje' => 'login-cliente', 'senha_pje' => 'senha-cliente']))
+        ->getJson(urlVisualizarDocumentoErroMni($processo->tribunal_id, $processo->numero_processo, $documento->id_documento))
         ->assertStatus(500)
         ->assertExactJson(['message' => 'Erro ao processar documento HTML:']);
 
-    // a reconsulta do HTML legado não repassa o par da requisição
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento)
+        ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe('env-login')
+        ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe('env-senha');
+})->with('formas_da_recusa_visualizar_documento');
+
+it('visualizar HTML legado sem par usa a credencial do tribunal', function (string $forma) {
+    // sem par na requisição e sem par padrão: a reconsulta cai na credencial
+    // do tribunal, cuja recusa não é do consultante e segue no 500
+    fakeS3ComLinks();
+    [$processo, $documento] = criarHtmlLegadoVisualizarDocumento();
+    $simulador = simularIntegracaoMni(recusaDoParVisualizarDocumento($forma));
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarDocumentoErroMni($processo->tribunal_id, $processo->numero_processo, $documento->id_documento))
+        ->assertStatus(500)
+        ->assertExactJson(['message' => 'Erro ao processar documento HTML:']);
+
     expect($simulador->requisicoes)->toHaveCount(1)
         ->and($simulador->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento)
         ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe('login-do-tribunal')
         ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe('{SENHA}');
-})->with([
-    'login recusado' => LOGIN_RECUSADO_VISUALIZAR_DOCUMENTO_ERRO_MNI,
-    'processo não encontrado' => PROCESSO_NAO_ENCONTRADO_VISUALIZAR_DOCUMENTO_ERRO_MNI,
-]);
+})->with('formas_da_recusa_visualizar_documento');
 
 it('visualizar HTML com path_html ausente no S3 responde 200 com link e conteudo_html nulo quando a recuperação complementar falha', function (string $mensagem) {
     fakeS3ComLinks();
@@ -636,4 +686,65 @@ it('visualizar PDF pendente responde 404 com codigo quando o download diz que o 
     expectCorpoSemSigiloVisualizarDocumentoCodigo($response);
     expect($simulador->requisicoes)->toHaveCount(1)
         ->and($simulador->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento);
+});
+
+it('visualizar HTML legado com o par do cliente recusado responde 403 com codigo', function (string $forma) {
+    fakeS3ComLinks();
+    [$processo, $documento] = criarHtmlLegadoVisualizarDocumento();
+    $simulador = simularIntegracaoMni(recusaDoParVisualizarDocumento($forma));
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarDocumentoErroMni($processo->tribunal_id, $processo->numero_processo, $documento->id_documento, parDoClienteVisualizarDocumentoCodigo()))
+        ->assertStatus(403)
+        ->assertExactJson([
+            'codigo' => 'credencial_pje_recusada',
+            'message' => 'Credencial PJe recusada pelo tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarDocumentoCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento)
+        ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe(LOGIN_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO)
+        ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe(SENHA_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO);
+})->with('formas_da_recusa_visualizar_documento');
+
+it('visualizar HTML legado com processo não encontrado responde 404 com codigo', function () {
+    fakeS3ComLinks();
+    [$processo, $documento] = criarHtmlLegadoVisualizarDocumento();
+    $simulador = simularIntegracaoMni(semSucessoVisualizarDocumentoErroMni(PROCESSO_NAO_ENCONTRADO_VISUALIZAR_DOCUMENTO_ERRO_MNI));
+
+    $response = $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarDocumentoErroMni($processo->tribunal_id, $processo->numero_processo, $documento->id_documento, parDoClienteVisualizarDocumentoCodigo()))
+        ->assertStatus(404)
+        ->assertExactJson([
+            'codigo' => 'processo_nao_encontrado',
+            'message' => 'Processo não encontrado no tribunal',
+        ]);
+
+    expectCorpoSemSigiloVisualizarDocumentoCodigo($response);
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento)
+        ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe(LOGIN_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO)
+        ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe(SENHA_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO);
+});
+
+it('visualizar HTML legado reconsulta com o par do cliente e responde 200 com o conteudo_html', function () {
+    fakeS3ComLinks();
+    [$processo, $documento] = criarHtmlLegadoVisualizarDocumento();
+    $simulador = simularIntegracaoMni(fn () => (object) [
+        'sucesso' => true,
+        'processo' => (object) ['documento' => documentoMniFake($documento)],
+    ]);
+
+    $this->withHeaders(['X-API-Token' => 'tk-test'])
+        ->getJson(urlVisualizarDocumentoErroMni($processo->tribunal_id, $processo->numero_processo, $documento->id_documento, parDoClienteVisualizarDocumentoCodigo()))
+        ->assertOk()
+        ->assertJsonPath('documento.link', 'https://s3.fake/' . $documento->path)
+        ->assertJsonPath('documento.conteudo_html', "<html><body><p>Documento {$documento->id_documento}</p></body></html>")
+        ->assertJsonMissingPath('codigo');
+
+    expect($simulador->requisicoes)->toHaveCount(1)
+        ->and($simulador->requisicoes[0]['parametros']['idConsultante'])->toBe(LOGIN_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO)
+        ->and($simulador->requisicoes[0]['parametros']['senhaConsultante'])->toBe(SENHA_CLIENTE_VISUALIZAR_DOCUMENTO_CODIGO)
+        ->and($documento->fresh()->path_html)->not->toBeNull();
 });
