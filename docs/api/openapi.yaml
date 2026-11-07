@@ -7,7 +7,9 @@ info:
     tribunais via integração MNI/PJe.
 
     ## Autenticação
-    Todas as rotas exigem o header `X-API-Token` com um token válido.
+    Todas as rotas exigem o header `X-API-Token` com um token válido, exceto
+    `POST /ocr/webhook`, que só o workflow do OCR chama e que se autentica
+    pela credencial do próprio `webhook_url` (`security: []`).
 
     ## Aviso de segurança
     Os endpoints de consulta de processo e documento recebem `login_pje` e
@@ -26,7 +28,7 @@ tags:
   - name: Processos
     description: Consulta e exportação de processos
   - name: Documentos
-    description: Consulta e download de documentos
+    description: Consulta, download e OCR de documentos
   - name: Tribunais
     description: Listagem de tribunais
   - name: Monitoramentos
@@ -595,6 +597,46 @@ paths:
                   uuid: { type: string, format: uuid }
         '401': { $ref: '#/components/responses/Erro401' }
         '404': { $ref: '#/components/responses/Erro404Monitoramento' }
+  /ocr/webhook:
+    post:
+      tags: [Documentos]
+      x-dependencia: DEP-04
+      summary: Retorno do workflow "Jurídico OCR (Gemini)" (só o workflow chama)
+      description: |
+        Chamado pelo workflow do n8n (nós "Avisar o sistema" e "Avisar falha")
+        no `webhook_url` que o ms-mni mandou em cada envio de documento (D-01).
+
+        - Fora de `X-API-Token`: a credencial vai na query do `webhook_url`,
+          gerada pelo ms-mni por documento e válida por M = 60 min
+          (configurável) depois do envio, sempre ≥ A = 20 min (RF-11). O
+          workflow chama a URL como recebida; o formato da credencial é
+          interno do ms-mni.
+        - `success` marca o documento como lido (prevalece sobre o erro);
+          `error` marca o documento aguardando retorno como erro definitivo e
+          nunca rebaixa um documento já lido. Retorno repetido responde `200`
+          sem mudança.
+        - `job_id` desconhecido, de job cancelado pelo ms-mni ou de documento
+          devolvido à fila responde `404`, sem mudança.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetornoDoWorkflowOcr' }
+      responses:
+        '200':
+          description: Retorno aceito, inclusive o repetido e o `error` sobre um documento já lido.
+        '401':
+          description: Sem credencial válida no `webhook_url`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
+        '404':
+          description: "`job_id` desconhecido, cancelado pelo ms-mni ou de documento devolvido à fila."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErroMensagem' }
+        '422': { $ref: '#/components/responses/Erro422' }
 webhooks:
   monitoramento:
     post:
@@ -1213,6 +1255,33 @@ components:
       properties:
         message: { type: string, example: "Exportação enfileirada" }
         exportacao_id: { type: integer, example: 42 }
+    RetornoDoWorkflowOcr:
+      x-dependencia: DEP-04
+      description: Corpo que o workflow manda ao `webhook_url` (nós "Avisar o sistema" e "Avisar falha").
+      oneOf:
+        - { $ref: '#/components/schemas/RetornoDoWorkflowOcrSucesso' }
+        - { $ref: '#/components/schemas/RetornoDoWorkflowOcrFalha' }
+    RetornoDoWorkflowOcrSucesso:
+      type: object
+      x-dependencia: DEP-04
+      required: [status, job_id]
+      properties:
+        status: { type: string, const: success }
+        job_id: { type: string, minLength: 1, description: "O `id` do `202` do envio (CT-03)." }
+        message: { type: string, example: "OCR + RAG processados com sucesso" }
+        bucket_destino: { type: [string, 'null'] }
+        path_destino: { type: [string, 'null'] }
+        indexed_chunks: { type: [integer, 'null'], minimum: 0 }
+    RetornoDoWorkflowOcrFalha:
+      type: object
+      x-dependencia: DEP-04
+      required: [status, job_id]
+      properties:
+        status: { type: string, const: error }
+        job_id: { type: string, minLength: 1, description: "O `id` do `202` do envio (CT-03)." }
+        message: { type: string, example: "Falha ao processar OCR+RAG" }
+        error_detail: { type: [string, 'null'] }
+        error: { type: [string, 'null'] }
   parameters:
     LoginPje:
       name: login_pje

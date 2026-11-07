@@ -7,8 +7,11 @@ use App\Http\Controllers\Api\ConsultarProcessoController;
 use App\Http\Controllers\Api\DocumentoController;
 use App\Http\Controllers\Api\DownloadProcessoController;
 use App\Http\Controllers\Api\MonitoramentoProcessoController;
+use App\Http\Controllers\Api\OcrWebhookController;
 use App\Http\Controllers\Api\TribunalController;
+use App\Http\Middleware\ForcarRespostaJson;
 use App\Http\Middleware\InjectCredenciaisPjePadrao;
+use App\Http\Middleware\ValidarAssinaturaWebhookOcr;
 use App\Http\Middleware\ValidateApiToken;
 
 Route::get('/user', function (Request $request) {
@@ -50,3 +53,11 @@ Route::middleware([ValidateApiToken::class])->group(function () {
         Route::post('/{uuid}/executar', [MonitoramentoProcessoController::class, 'executar']);
     });
 });
+
+// Retorno do workflow "Jurídico OCR (Gemini)" do n8n: só o workflow chama,
+// no webhook_url que o ms-mni mandou em cada envio de documento. Fica fora
+// dos dois grupos acima, sem X-API-Token: a autenticação é a credencial do
+// próprio webhook_url (URL assinada por documento, WebhookOcrUrl::gerar).
+Route::post('/ocr/webhook', [OcrWebhookController::class, 'store'])
+    ->name('ocr.webhook')
+    ->middleware([ForcarRespostaJson::class, ValidarAssinaturaWebhookOcr::class]);
