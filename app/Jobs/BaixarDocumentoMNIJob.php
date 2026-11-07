@@ -4,13 +4,21 @@ namespace App\Jobs;
 
 use App\Exceptions\MNIException;
 use App\Models\ProcessoDocumento;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use App\Services\Processo\SalvarDocumentoProcessoService;
 use Illuminate\Support\Facades\Log;
 
-class BaixarDocumentoMNIJob implements ShouldQueue, ShouldBeUnique
+/**
+ * ShouldBeEncrypted: no ms-mni, o par do PJe só fica em jobs cifrados. Sem a
+ * cifra, login e senha iriam em texto claro para a fila (Redis/Horizon,
+ * `jobs`) e para `failed_jobs`. Um payload antigo sem cifra, já na fila no
+ * deploy, segue processável: o CallQueuedHandler desserializa direto o que
+ * começa com `O:`.
+ */
+class BaixarDocumentoMNIJob implements ShouldQueue, ShouldBeUnique, ShouldBeEncrypted
 {
     use Queueable;
     public $priority = 2;
@@ -23,7 +31,11 @@ class BaixarDocumentoMNIJob implements ShouldQueue, ShouldBeUnique
     /**
      * Create a new job instance.
      */
-    public function __construct($documento, $login_pje = null, $senha_pje = null)
+    public function __construct(
+        $documento,
+        #[\SensitiveParameter] $login_pje = null,
+        #[\SensitiveParameter] $senha_pje = null,
+    )
     {
         $this->documento = $documento;
         $this->login_pje = $login_pje;

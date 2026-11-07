@@ -101,6 +101,8 @@ return [
         'redis:default' => 120,
         'redis:mni-download' => 60,
         'redis:exportar-processo' => 180,
+        'redis:ocr-download' => 60,
+        'redis:ocr-envio' => 60,
     ],
 
     /*
@@ -285,6 +287,63 @@ return [
             'timeout' => 60,
             'nice' => 0,
         ],
+
+        // OCR do processo (RNF-02): em produção, download + envio somam 20
+        // workers (12 + 8), a capacidade pedida para 300 PDFs em 10 minutos.
+        // As filas são próprias para não disputar com `mni-download`.
+        'supervisor-ocr-download' => [
+            'connection' => 'redis',
+            'queue' => ['ocr-download'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => 1,
+            'maxProcesses' => 1,
+            'balanceMaxShift' => 1,
+            'balanceCooldown' => 3,
+            'maxTime' => 1800,
+            'maxJobs' => 0,
+            'memory' => 512,
+            'tries' => 3,
+            'timeout' => 300,
+            'nice' => 0,
+        ],
+
+        // `ocr-envio` também atende a consulta do job no workflow
+        // (GET jobs/{job_id}) antes do reenvio de documento sem retorno.
+        'supervisor-ocr-envio' => [
+            'connection' => 'redis',
+            'queue' => ['ocr-envio'],
+            'balance' => 'simple',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => 1,
+            'maxProcesses' => 1,
+            'balanceMaxShift' => 1,
+            'balanceCooldown' => 3,
+            'maxTime' => 3600,
+            'maxJobs' => 0,
+            'memory' => 512,
+            'tries' => 5,
+            'timeout' => 60,
+            'nice' => 0,
+        ],
+
+        // Avisos ocr_progresso aos assinantes (callback do Sistema).
+        'supervisor-ocr-aviso' => [
+            'connection' => 'redis',
+            'queue' => ['ocr-aviso'],
+            'balance' => 'simple',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => 1,
+            'maxProcesses' => 1,
+            'balanceMaxShift' => 1,
+            'balanceCooldown' => 3,
+            'maxTime' => 3600,
+            'maxJobs' => 0,
+            'memory' => 512,
+            'tries' => 5,
+            'timeout' => 60,
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
@@ -304,6 +363,16 @@ return [
             'supervisor-monitoramento-webhook' => [
                 'maxProcesses' => 2,
             ],
+            // Download + envio do OCR = 12 + 8 = 20 workers (RNF-02).
+            'supervisor-ocr-download' => [
+                'maxProcesses' => 12,
+            ],
+            'supervisor-ocr-envio' => [
+                'maxProcesses' => 8,
+            ],
+            'supervisor-ocr-aviso' => [
+                'maxProcesses' => 2,
+            ],
         ],
 
         'local' => [
@@ -320,6 +389,15 @@ return [
                 'maxProcesses' => 1,
             ],
             'supervisor-monitoramento-webhook' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-ocr-download' => [
+                'maxProcesses' => 2,
+            ],
+            'supervisor-ocr-envio' => [
+                'maxProcesses' => 2,
+            ],
+            'supervisor-ocr-aviso' => [
                 'maxProcesses' => 1,
             ],
         ],
@@ -348,6 +426,15 @@ return [
                 'maxProcesses' => 1,
             ],
             'supervisor-monitoramento-webhook' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-ocr-download' => [
+                'maxProcesses' => 2,
+            ],
+            'supervisor-ocr-envio' => [
+                'maxProcesses' => 2,
+            ],
+            'supervisor-ocr-aviso' => [
                 'maxProcesses' => 1,
             ],
         ],

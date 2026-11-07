@@ -11,6 +11,14 @@ class ProcessoDocumento extends Model
     const STATUS_PENDENTE = 'pendente';
     const STATUS_ERRO = 'erro';
 
+    // Situação do documento no OCR (`ocr_situacao`). null conta como
+    // pendente; `enviado` é o "aguardando retorno" do workflow; `erro` é o
+    // com_erro das contagens. Independente do `status` do binário.
+    const OCR_PENDENTE = 'pendente';
+    const OCR_ENVIADO = 'enviado';
+    const OCR_PROCESSADO = 'processado';
+    const OCR_ERRO = 'erro';
+
     protected $table = 'processo_documentos';
     protected $fillable = [
         'processo_id',
@@ -32,11 +40,20 @@ class ProcessoDocumento extends Model
         'file_size',
         'tentativas_download',
         'erro_mni',
+        'ocr_situacao',
+        'ocr_job_id',
+        'ocr_job_id_cancelar',
+        'ocr_enviado_em',
+        'ocr_concluido_em',
+        'ocr_erro',
     ];
 
+    // Sem cast em data_juntada: mudaria a serialização de /documento/visualizar.
     protected $casts = [
         'id_documento' => 'integer',
         'downloaded_at' => 'datetime',
+        'ocr_enviado_em' => 'datetime',
+        'ocr_concluido_em' => 'datetime',
     ];
 
     protected $hidden = [
@@ -51,6 +68,14 @@ class ProcessoDocumento extends Model
         'path',
         'path_html',
         'conteudo_html',
+        // Estado interno do OCR: /documento/visualizar e
+        // /processo/documentos/listar não ganham campo novo (CT-06).
+        'ocr_situacao',
+        'ocr_job_id',
+        'ocr_job_id_cancelar',
+        'ocr_enviado_em',
+        'ocr_concluido_em',
+        'ocr_erro',
     ];
 
     public function temConteudoHtml(): bool

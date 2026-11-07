@@ -7,6 +7,7 @@ use App\Models\ProcessoDocumento;
 use App\Services\Processo\BaixarDocumentosEmLoteService;
 use App\Services\Processo\SalvarDocumentoProcessoService;
 use App\Services\Processo\TravaDownloadDocumento;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -19,8 +20,14 @@ use Illuminate\Support\Facades\Storage;
  * Sem ShouldBeUnique: quem impede o mesmo documento em dois lotes é a
  * TravaDownloadDocumento, adquirida no despacho por documento. O job só a
  * libera ao terminar: sem exceção em handle() ou na falha definitiva.
+ *
+ * ShouldBeEncrypted: no ms-mni, o par do PJe só fica em jobs cifrados. Sem a
+ * cifra, login e senha iriam em texto claro para a fila (Redis/Horizon,
+ * `jobs`) e para `failed_jobs`. Um payload antigo sem cifra, já na fila no
+ * deploy, segue processável: o CallQueuedHandler desserializa direto o que
+ * começa com `O:`.
  */
-class BaixarDocumentosMNIEmLoteJob implements ShouldQueue
+class BaixarDocumentosMNIEmLoteJob implements ShouldQueue, ShouldBeEncrypted
 {
     use Queueable;
 
@@ -38,8 +45,8 @@ class BaixarDocumentosMNIEmLoteJob implements ShouldQueue
         public array $processoDocumentoIds,
         public array $tentativasNoDespacho,
         public string $donoTrava,
-        private ?string $login_pje = null,
-        private ?string $senha_pje = null,
+        #[\SensitiveParameter] private ?string $login_pje = null,
+        #[\SensitiveParameter] private ?string $senha_pje = null,
     ) {}
 
     public function handle(): void

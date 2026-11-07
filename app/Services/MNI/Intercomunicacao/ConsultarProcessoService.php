@@ -17,8 +17,8 @@ class ConsultarProcessoService
     public function execute(
         Tribunal $tribunal,
         $numero_processo,
-        $login_pje = null,
-        $senha_pje = null,
+        #[\SensitiveParameter] $login_pje = null,
+        #[\SensitiveParameter] $senha_pje = null,
         $incluir_documentos = true,
         $incluir_cabecalho = true,
         $incluir_movimentos = true,

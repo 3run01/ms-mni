@@ -38,7 +38,11 @@ class EnfileirarDownloadDocumentosService
      * @throws \Throwable quando o despacho de um lote falha, depois de soltar as
      *                    travas que nenhum job enfileirado vai liberar
      */
-    public function enfileirar(iterable $documentos, ?string $login = null, ?string $senha = null): array
+    public function enfileirar(
+        iterable $documentos,
+        #[\SensitiveParameter] ?string $login = null,
+        #[\SensitiveParameter] ?string $senha = null,
+    ): array
     {
         $resumo = ['lotes' => 0, 'documentos_em_lote' => 0, 'videos' => 0, 'ignorados_trava' => 0];
         $naoVideosPorProcesso = [];
@@ -119,7 +123,12 @@ class EnfileirarDownloadDocumentosService
     /**
      * @param  Collection<int, ProcessoDocumento>  $lote
      */
-    private function despacharLote(Collection $lote, string $dono, ?string $login, ?string $senha): void
+    private function despacharLote(
+        Collection $lote,
+        string $dono,
+        #[\SensitiveParameter] ?string $login,
+        #[\SensitiveParameter] ?string $senha,
+    ): void
     {
         BaixarDocumentosMNIEmLoteJob::dispatch(
             $lote->first()->processo_id,

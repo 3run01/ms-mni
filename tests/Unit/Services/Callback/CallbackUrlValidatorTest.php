@@ -37,3 +37,57 @@ it('rejeita localhost e IPs internos', function () {
 it('assertValida lança em URL inválida', function () {
     $this->v->assertValida('http://localhost');
 })->throws(InvalidCallbackUrlException::class);
+
+// ---------- RF-17: hosts liberados fora de produção ----------
+
+function liberarHostsCallback(string $ambiente, array $hosts): void
+{
+    config()->set('app.env', $ambiente);
+    config()->set('pje.callback.hosts_liberados', $hosts);
+}
+
+it('aceita host liberado com http fora de produção, sem diferenciar maiúsculas e com qualquer porta e caminho', function () {
+    liberarHostsCallback('local', ['host.docker.internal']);
+
+    expect($this->v->ehValida('http://HOST.docker.internal:8006/x?y=1'))->toBeTrue()
+        ->and($this->v->ehValida('https://host.docker.internal/mni/aviso?assinatura=x'))->toBeTrue()
+        ->and($this->v->ehValida('http://host.docker.internal'))->toBeTrue();
+
+    $this->v->assertValida('http://HOST.docker.internal:8006/x?y=1');
+});
+
+it('aceita host liberado mesmo quando ele é IP interno', function () {
+    liberarHostsCallback('homolog', ['10.1.2.3', 'localhost']);
+
+    expect($this->v->ehValida('http://10.1.2.3:8080/webhook'))->toBeTrue()
+        ->and($this->v->ehValida('http://localhost/webhook'))->toBeTrue();
+});
+
+it('ignora a lista de hosts liberados em produção', function () {
+    liberarHostsCallback('production', ['host.docker.internal']);
+
+    expect($this->v->ehValida('http://HOST.docker.internal:8006/x?y=1'))->toBeFalse()
+        ->and($this->v->ehValida('https://host.docker.internal/x'))->toBeFalse();
+});
+
+it('rejeita o host liberado com esquema que não seja http ou https', function () {
+    liberarHostsCallback('local', ['host.docker.internal']);
+
+    expect($this->v->ehValida('ftp://host.docker.internal/x'))->toBeFalse()
+        ->and($this->v->ehValida('host.docker.internal/x'))->toBeFalse();
+});
+
+it('rejeita fora de produção com a lista vazia ou com outro host', function () {
+    liberarHostsCallback('local', []);
+    expect($this->v->ehValida('http://HOST.docker.internal:8006/x?y=1'))->toBeFalse();
+
+    liberarHostsCallback('local', ['outro.host.interno']);
+    expect($this->v->ehValida('http://HOST.docker.internal:8006/x?y=1'))->toBeFalse()
+        ->and($this->v->ehValida('http://host.docker.internal.evil.example/x'))->toBeFalse();
+});
+
+it('assertValida lança para o host liberado em produção', function () {
+    liberarHostsCallback('production', ['host.docker.internal']);
+
+    $this->v->assertValida('http://host.docker.internal:8006/x');
+})->throws(InvalidCallbackUrlException::class);

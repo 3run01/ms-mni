@@ -60,4 +60,24 @@ return [
         'max_paginas' => env('PJE_DOWNLOAD_MAX_PAGINAS'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Callbacks de saída
+    |--------------------------------------------------------------------------
+    |
+    | `hosts_liberados` (CALLBACK_HOSTS_LIBERADOS, separados por vírgula):
+    | fora de `production`, o CallbackUrlValidator aceita `http` ou `https`
+    | para esses hosts, mesmo que resolvam para IP interno. É o que deixa o
+    | Sistema de desenvolvimento receber avisos em `http://host.docker.internal`.
+    | Em `production` a lista é ignorada. Vazia por padrão.
+    |
+    */
+
+    'callback' => [
+        'hosts_liberados' => array_values(array_filter(
+            array_map('trim', explode(',', (string) env('CALLBACK_HOSTS_LIBERADOS', ''))),
+            static fn (string $host) => $host !== '',
+        )),
+    ],
+
 ];

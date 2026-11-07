@@ -43,7 +43,16 @@ class IntegracaoBase
         // }
     }
 
-    public function makeSoapRequest($function, $params)
+    /**
+     * `$params` leva o par do PJe (`idConsultante`/`senhaConsultante`).
+     * #[\SensitiveParameter] nele e em todo parâmetro de login e senha da
+     * cadeia MNI (services MNI e de Processo): com
+     * `zend.exception_ignore_args = 0`, o trace de uma exceção como texto
+     * (getTraceAsString, log, failed_jobs) mostra os argumentos de cada
+     * chamada, e o par sairia em texto claro. Com o atributo, o PHP troca o
+     * valor por SensitiveParameterValue no trace.
+     */
+    public function makeSoapRequest($function, #[\SensitiveParameter] $params)
     {
         $this->initiateSoap();
 

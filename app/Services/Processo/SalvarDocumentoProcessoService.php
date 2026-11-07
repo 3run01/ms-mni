@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Process;
 
 class SalvarDocumentoProcessoService
 {
-    public function execute($processo, $documentos, $login_pje = null, $senha_pje = null, bool $baixar_binarios = true)
+    public function execute($processo, $documentos, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null, bool $baixar_binarios = true)
     {
         $documentos = is_array($documentos) ? $documentos : [$documentos];
         $paraBaixar = [];
@@ -52,7 +52,7 @@ class SalvarDocumentoProcessoService
      *
      * @return ProcessoDocumento
      */
-    public function salvarDocumento($processo, $documento, $login_pje = null, $senha_pje = null, bool $baixar_binarios = true)
+    public function salvarDocumento($processo, $documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null, bool $baixar_binarios = true)
     {
         $processoDocumento = ProcessoDocumento::updateOrCreate(
             [
@@ -104,7 +104,7 @@ class SalvarDocumentoProcessoService
         return null;
     }
 
-    public function baixarDocumento($documento, $login_pje = null, $senha_pje = null)
+    public function baixarDocumento($documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null)
     {
         // try {
         // Verifica se o documento já está baixado e existe no S3
@@ -230,7 +230,7 @@ class SalvarDocumentoProcessoService
         return $this->salvarConteudoOutros($documento, $documentoMni);
     }
 
-    public function downloadHTML($documento, $login_pje = null, $senha_pje = null)
+    public function downloadHTML($documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null)
     {
         try {
             $documentoMNI = $this->consultarDocumento($documento, $login_pje, $senha_pje);
@@ -319,7 +319,7 @@ class SalvarDocumentoProcessoService
         return $conteudo;
     }
 
-    public function downloadPDF($documento, $login_pje = null, $senha_pje = null)
+    public function downloadPDF($documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null)
     {
         try {
             $documentoMNI = $this->consultarDocumento($documento, $login_pje, $senha_pje);
@@ -351,7 +351,7 @@ class SalvarDocumentoProcessoService
         return $filename;
     }
 
-    public function downloadOutros($documento, $login_pje = null, $senha_pje = null)
+    public function downloadOutros($documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null)
     {
         try {
             $documentoMNI = $this->consultarDocumento($documento, $login_pje, $senha_pje);
@@ -420,7 +420,7 @@ class SalvarDocumentoProcessoService
         return $extensoes[$mimetype] ?? 'dat'; // 'dat' como extensão padrão para tipos desconhecidos
     }
 
-    public function consultarDocumento($documento, $login_pje = null, $senha_pje = null)
+    public function consultarDocumento($documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null)
     {
         try {
             if (!$documento->processo) {
@@ -466,7 +466,7 @@ class SalvarDocumentoProcessoService
         }
     }
 
-    public function downloadMP4($documento, $login_pje = null, $senha_pje = null)
+    public function downloadMP4($documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null)
     {
         try {
             if (!$documento->processo) {
@@ -603,7 +603,7 @@ class SalvarDocumentoProcessoService
         }
     }
 
-    public function downloadQuicktime($documento, $login_pje = null, $senha_pje = null)
+    public function downloadQuicktime($documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null)
     {
         try {
             if (!$documento->processo) {
@@ -726,7 +726,7 @@ class SalvarDocumentoProcessoService
         }
     }
 
-    public function downloadAudio($documento, $login_pje = null, $senha_pje = null)
+    public function downloadAudio($documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null)
     {
         try {
             $documentoMNI = $this->consultarDocumento($documento, $login_pje, $senha_pje);

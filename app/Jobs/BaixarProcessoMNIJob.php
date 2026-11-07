@@ -3,12 +3,20 @@
 namespace App\Jobs;
 
 use App\Exceptions\MNIException;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use App\Services\Processo\ProcessoService;
 use Illuminate\Support\Facades\Log;
 
-class BaixarProcessoMNIJob implements ShouldQueue
+/**
+ * ShouldBeEncrypted: no ms-mni, o par do PJe só fica em jobs cifrados. Sem a
+ * cifra, login e senha iriam em texto claro para a fila (Redis/Horizon,
+ * `jobs`) e para `failed_jobs`. Um payload antigo sem cifra, já na fila no
+ * deploy, segue processável: o CallQueuedHandler desserializa direto o que
+ * começa com `O:`.
+ */
+class BaixarProcessoMNIJob implements ShouldQueue, ShouldBeEncrypted
 {
     use Queueable;
     public $tribunal;
@@ -23,8 +31,8 @@ class BaixarProcessoMNIJob implements ShouldQueue
     public function __construct(
         $tribunal,
         $numero_processo,
-        $login_pje = null,
-        $senha_pje = null,
+        #[\SensitiveParameter] $login_pje = null,
+        #[\SensitiveParameter] $senha_pje = null,
         $data_referencia = null
     ) {
         $this->tribunal = $tribunal;

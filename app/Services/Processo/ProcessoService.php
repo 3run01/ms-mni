@@ -26,8 +26,8 @@ class ProcessoService
     public function consultarNumero(
         $tribunal,
         $numero_processo,
-        $login = null,
-        $senha = null,
+        #[\SensitiveParameter] $login = null,
+        #[\SensitiveParameter] $senha = null,
         $data_referencia = null,
         bool $baixar_binarios = true
     ) {
@@ -67,8 +67,8 @@ class ProcessoService
     public function consultarDadosBasicos(
         $tribunal,
         $numero_processo,
-        $login = null,
-        $senha = null,
+        #[\SensitiveParameter] $login = null,
+        #[\SensitiveParameter] $senha = null,
     ) {
         $retorno = $this->consultarProcessoService->execute(
             $tribunal,
@@ -91,8 +91,8 @@ class ProcessoService
     public function consultarMovimentos(
         $tribunal,
         $numero_processo,
-        $login = null,
-        $senha = null,
+        #[\SensitiveParameter] $login = null,
+        #[\SensitiveParameter] $senha = null,
         $data_referencia = null,
     ) {
         $retorno = $this->consultarProcessoService->execute(
@@ -115,8 +115,8 @@ class ProcessoService
     public function consultarDocumentos(
         $tribunal,
         $numero_processo,
-        $login = null,
-        $senha = null,
+        #[\SensitiveParameter] $login = null,
+        #[\SensitiveParameter] $senha = null,
         $data_referencia = null,
     ) {
         $retorno = $this->consultarProcessoService->execute(
@@ -138,8 +138,8 @@ class ProcessoService
     public function getProcesso(
         $tribunal,
         $numero_processo,
-        $login = null,
-        $senha = null
+        #[\SensitiveParameter] $login = null,
+        #[\SensitiveParameter] $senha = null
     ) {
         //verifica se o processo existe
         $processo = Processo::where('numero_processo', $numero_processo)

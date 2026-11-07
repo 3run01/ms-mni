@@ -21,8 +21,8 @@ class ConsultarDocumentoService
         Tribunal $tribunal,
         $numero_processo,
         $documento_id,
-        $login_pje = null,
-        $senha_pje = null,
+        #[\SensitiveParameter] $login_pje = null,
+        #[\SensitiveParameter] $senha_pje = null,
     ) {
         // Sem par informado a chamada usa a credencial do tribunal, cuja recusa
         // não é do consultante e por isso não é classificada.
@@ -104,8 +104,8 @@ class ConsultarDocumentoService
         Tribunal $tribunal,
         string $numeroProcesso,
         string $idDocumento,
-        ?string $login = null,
-        ?string $senha = null,
+        #[\SensitiveParameter] ?string $login = null,
+        #[\SensitiveParameter] ?string $senha = null,
     ): ?object {
         try {
             $integracao = $this->novaIntegracao($tribunal);
@@ -138,7 +138,13 @@ class ConsultarDocumentoService
         return app()->makeWith(IntegracaoBase::class, ['url' => $tribunal->url_webservice_mni]);
     }
 
-    private function parametros(Tribunal $tribunal, $numero_processo, $documento_id, $login_pje, $senha_pje): array
+    private function parametros(
+        Tribunal $tribunal,
+        $numero_processo,
+        $documento_id,
+        #[\SensitiveParameter] $login_pje,
+        #[\SensitiveParameter] $senha_pje,
+    ): array
     {
         return [
             'idConsultante' => $login_pje ?? $tribunal->login,
