@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\ConsultarProcessoController;
 use App\Http\Controllers\Api\DocumentoController;
 use App\Http\Controllers\Api\DownloadProcessoController;
 use App\Http\Controllers\Api\MonitoramentoProcessoController;
+use App\Http\Controllers\Api\OcrProcessoController;
 use App\Http\Controllers\Api\OcrWebhookController;
 use App\Http\Controllers\Api\TribunalController;
 use App\Http\Middleware\ForcarRespostaJson;
@@ -52,6 +53,14 @@ Route::middleware([ValidateApiToken::class])->group(function () {
         Route::get('/{uuid}/execucoes', [MonitoramentoProcessoController::class, 'execucoes']);
         Route::post('/{uuid}/executar', [MonitoramentoProcessoController::class, 'executar']);
     });
+
+    // Pedido de OCR do processo (DEP-03): fica neste grupo, só com
+    // ValidateApiToken, de propósito. Sem InjectCredenciaisPjePadrao, o par
+    // padrão do .env nunca é usado nem enfileirado: sem login_pje e senha_pje
+    // no corpo, o pedido é 422. ForcarRespostaJson garante o 422 em JSON
+    // mesmo para quem chama sem Accept: application/json.
+    Route::post('/processo/ocr', [OcrProcessoController::class, 'store'])
+        ->middleware(ForcarRespostaJson::class);
 });
 
 // Retorno do workflow "Jurídico OCR (Gemini)" do n8n: só o workflow chama,

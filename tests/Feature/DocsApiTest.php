@@ -11,3 +11,13 @@ it('serve a spec OpenAPI em yaml', function () {
         ->assertOk()
         ->assertHeader('Content-Type', 'application/yaml');
 });
+
+it('serve a spec atualizada com o /processo/ocr e o webhook ocr_progresso (RNF-04)', function () {
+    $resposta = $this->get('/docs/api/openapi.yaml')->assertOk();
+
+    $conteudo = file_get_contents($resposta->baseResponse->getFile()->getPathname());
+
+    expect($conteudo)->toContain('/processo/ocr:')
+        ->and($conteudo)->toContain('ocr_progresso:')
+        ->and($conteudo)->toContain('SolicitacaoDeOcr:');
+});
