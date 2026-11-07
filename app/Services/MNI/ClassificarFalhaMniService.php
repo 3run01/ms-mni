@@ -2,6 +2,9 @@
 
 namespace App\Services\MNI;
 
+use App\Exceptions\CredencialPjeRecusadaException;
+use Throwable;
+
 /**
  * Reconhece, no texto cru devolvido pelo MNI/PJe, as falhas que a API expõe
  * com código estável: credencial recusada e processo inexistente.
@@ -33,5 +36,25 @@ class ClassificarFalhaMniService
     public static function processoNaoEncontrado(?string $mensagemCrua): bool
     {
         return preg_match(self::PADRAO_PROCESSO_NAO_ENCONTRADO, (string) $mensagemCrua) === 1;
+    }
+
+    /**
+     * A recusa do par já classificada (CredencialPjeRecusadaException) em $e
+     * ou na cadeia de getPrevious(): os wrappers do download
+     * (`Erro ao processar documento PDF: ...`) levam a falha do tribunal
+     * como previous.
+     *
+     * Usado pelos jobs, que não chamam ErroComCodigo de app/Http (PQ-03):
+     * só reconhece o tipo, sem reler texto e sem decidir status HTTP.
+     */
+    public static function recusaNaCadeia(Throwable $e): bool
+    {
+        for ($atual = $e; $atual !== null; $atual = $atual->getPrevious()) {
+            if ($atual instanceof CredencialPjeRecusadaException) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
