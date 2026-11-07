@@ -3,7 +3,9 @@
 namespace App\Services\Processo;
 
 use App\Models\Processo;
+use App\Models\Tribunal;
 use App\Services\MNI\Intercomunicacao\ConsultarProcessoService;
+use Illuminate\Support\Facades\DB;
 
 class ProcessoService
 {
@@ -62,6 +64,54 @@ class ProcessoService
         $salvarDocumentoProcessoService->execute($processo, $retorno->documento, $login, $senha, $baixar_binarios);
 
         return $processo;
+    }
+
+    /**
+     * Lista completa do processo para o OCR (RF-04 item 1, D8): consulta a
+     * linha `$tribunal` com o par do pedido e grava dados básicos, partes,
+     * movimentos e todos os documentos.
+     *
+     * Difere de consultarNumero em dois pontos, de propósito:
+     * - `dataReferencia` nulo, sem o recorte de 90 dias: o documento antigo
+     *   que ainda não está no banco também entra no OCR, e os novos no
+     *   tribunal entram a cada processamento;
+     * - grava sem baixar binários: o download do OCR sai pela fila própria,
+     *   cifrada com o par do dono (RF-09), e não em paralelo pelos jobs de
+     *   `mni-download`.
+     *
+     * O par é obrigatório: o OCR nunca cai no par padrão nem na credencial do
+     * tribunal (RF-02). A recusa do par e o processo inexistente sobem como
+     * CredencialPjeRecusadaException e ProcessoNaoEncontradoNoTribunalException,
+     * sem embrulho e antes de qualquer gravação.
+     */
+    public function consultarListaCompletaParaOcr(
+        Tribunal $tribunal,
+        string $numero,
+        #[\SensitiveParameter] string $login,
+        #[\SensitiveParameter] string $senha,
+    ): Processo {
+        $retorno = $this->consultarProcessoService->execute(
+            $tribunal,
+            $numero,
+            $login,
+            $senha,
+            true,
+            true,
+            true,
+            null,
+        );
+
+        // Numa transação: as contagens do 202 saem logo depois desta
+        // gravação, e uma lista gravada pela metade daria contagens erradas.
+        return DB::transaction(function () use ($tribunal, $retorno) {
+            $processo = $this->salvarDadosBasicosProcessoService->execute($tribunal, $retorno->dadosBasicos);
+            $this->salvarParteProcessoService->execute($processo, $retorno->dadosBasicos->polo ?? []);
+            $this->salvarMovimentoProcessoService->execute($processo, $retorno->movimento ?? []);
+            // Sem o par: com baixar_binarios = false, nada é enfileirado.
+            $this->salvarDocumentoProcessoService->execute($processo, $retorno->documento ?? [], null, null, false);
+
+            return $processo;
+        });
     }
 
     public function consultarDadosBasicos(
