@@ -50,10 +50,11 @@ use Illuminate\Support\Facades\Log;
  *    de D9. Os aguardando retorno com idade < A não entram na fila (RF-18
  *    itens 1 e 4). Uma UniqueConstraintViolationException na abertura (a
  *    trava venceu durante a consulta e outro pedido abriu) vira carona;
- * 6. depois do commit: "a enfileirar" já `baixado` com `path` →
+ * 6. depois do commit: "a enfileirar" legível, já `baixado` com `path` →
  *    EnviarDocumentoAoOcrJob, com 0 SOAP (RF-09, D3); senão
- *    BaixarDocumentoParaOcrJob, cifrado, com o par do dono. "A consultar" →
- *    VerificarReenvioOcrJob, sem o par (D9);
+ *    BaixarDocumentoParaOcrJob, cifrado, com o par do dono. O mimetype vazio
+ *    vai sempre ao download, que o revela pelo tribunal (RF-08, RF-13).
+ *    "A consultar" → VerificarReenvioOcrJob, sem o par (D9);
  * 7. devolve `em_andamento` com as contagens depois da devolução (`com_erro`
  *    = 0, D-08).
  *
@@ -224,11 +225,13 @@ class SolicitarOcrProcessoService
         // processado nunca volta.
         $devolvidos = 0;
 
-        foreach ($this->legiveis($processoId)->where('ocr_situacao', ProcessoDocumento::OCR_ERRO)->orderBy('id')->get() as $documento) {
+        foreach ($this->doConjuntoDoTotal($processoId)->where('ocr_situacao', ProcessoDocumento::OCR_ERRO)->orderBy('id')->get() as $documento) {
             $devolvidos += $this->processamentos->devolverParaFila($documento) ? 1 : 0;
         }
 
-        $aEnfileirar = $this->legiveis($processoId)
+        // O mimetype entra na leitura: o despacho só manda direto ao envio o
+        // documento legível (RF-13), e o vazio vai ao download (RF-08).
+        $aEnfileirar = $this->doConjuntoDoTotal($processoId)
             ->where(fn (Builder $q) => $q
                 ->whereNull('ocr_situacao')
                 ->orWhereNotIn('ocr_situacao', [
@@ -237,14 +240,14 @@ class SolicitarOcrProcessoService
                     ProcessoDocumento::OCR_ERRO,
                 ]))
             ->orderBy('id')
-            ->get(['id', 'status', 'path']);
+            ->get(['id', 'status', 'path', 'mimetype']);
 
         // RF-18 item 3: o aguardando retorno com idade ≥ A só é reenviado
         // depois da consulta do job antigo (D9). Até lá segue `enviado`, com o
         // job conhecido pelo webhook.
         $idadeDeReenvio = (int) config('services.n8n_ocr.idade_maxima_sem_retorno_minutos');
 
-        $aConsultar = $this->legiveis($processoId)
+        $aConsultar = $this->doConjuntoDoTotal($processoId)
             ->where('ocr_situacao', ProcessoDocumento::OCR_ENVIADO)
             ->where(fn (Builder $q) => $q
                 ->whereNull('ocr_enviado_em')
@@ -323,11 +326,20 @@ class SolicitarOcrProcessoService
     private function despachar(int $processamentoId, Collection $aEnfileirar, Collection $aConsultar, DadosSolicitacaoOcr $dados): void
     {
         $downloads = 0;
+        $downloadsSemMimetype = 0;
         $envios = 0;
 
         foreach ($aEnfileirar as $documento) {
             // D3: a decisão olha só o banco; o envio confere o objeto no S3.
-            if ($documento->status === ProcessoDocumento::STATUS_BAIXADO && filled($documento->path)) {
+            // O atalho vale só para mimetype legível (RF-13): o vazio, mesmo
+            // `baixado` com `path` (o `.dat`), vai ao download, que pede o
+            // documento ao tribunal com o par do dono e revela o mimetype
+            // (RF-08, RF-09).
+            if (
+                FormatosOcr::ehLegivel($documento->mimetype)
+                && $documento->status === ProcessoDocumento::STATUS_BAIXADO
+                && filled($documento->path)
+            ) {
                 dispatch(new EnviarDocumentoAoOcrJob($processamentoId, $documento->id));
                 $envios++;
 
@@ -336,6 +348,10 @@ class SolicitarOcrProcessoService
 
             dispatch(new BaixarDocumentoParaOcrJob($processamentoId, $documento->id, $dados->login, $dados->senha));
             $downloads++;
+
+            if ($documento->mimetype === FormatosOcr::MIMETYPE_NAO_INFORMADO) {
+                $downloadsSemMimetype++;
+            }
         }
 
         foreach ($aConsultar as $documentoId) {
@@ -344,19 +360,27 @@ class SolicitarOcrProcessoService
 
         Log::info("[ProcessamentoOcr:{$processamentoId}] jobs do pedido despachados", [
             'downloads' => $downloads,
+            'downloads_sem_mimetype' => $downloadsSemMimetype,
             'envios' => $envios,
             'consultas_antes_do_reenvio' => $aConsultar->count(),
         ]);
     }
 
     /**
+     * Documentos do conjunto do total (RF-07): legível ou mimetype não
+     * informado, o mesmo critério de FormatosOcr::entraNoTotal e da contagem
+     * (RNF-03). Vale para a devolução do `com_erro`, para "a enfileirar" e
+     * para "a consultar": o vazio entra na fila e é revelado pelo download.
+     *
      * @return Builder<ProcessoDocumento>
      */
-    private function legiveis(int $processoId): Builder
+    private function doConjuntoDoTotal(int $processoId): Builder
     {
         return ProcessoDocumento::query()
             ->where('processo_id', $processoId)
-            ->whereIn('mimetype', FormatosOcr::MIMETYPES_LEGIVEIS);
+            ->where(fn (Builder $q) => $q
+                ->whereIn('mimetype', FormatosOcr::MIMETYPES_LEGIVEIS)
+                ->orWhere('mimetype', FormatosOcr::MIMETYPE_NAO_INFORMADO));
     }
 
     private function processoGravado(int $tribunalId, string $numeroProcesso): ?int

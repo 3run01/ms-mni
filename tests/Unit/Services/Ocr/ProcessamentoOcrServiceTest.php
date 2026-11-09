@@ -11,9 +11,12 @@ use App\Services\Ocr\ContagemOcr;
 use App\Services\Ocr\ContagemOcrService;
 use App\Services\Ocr\ProcessamentoOcrService;
 use App\Services\Ocr\ResultadoRetornoOcr;
+use App\Services\Ocr\ResultadoRevelacaoOcr;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 
 /*
@@ -837,5 +840,374 @@ it('a mudança do documento é desfeita junto com os avisos quando a transação
 
     expect($documentos[0]->fresh()->ocr_situacao)->toBe(ProcessoDocumento::OCR_ENVIADO)
         ->and($processamento->fresh()->ultimo_progresso_em)->toBeNull()
+        ->and(totalAvisosProcOcr())->toBe(0);
+});
+
+// ---------- revelação do mimetype (T10; RF-10, RF-11, RF-12, RNF-05) ----------
+
+it('revelado legível → Enviar, mimetype gravado, sem progresso e com 0 avisos', function (string $revelado) {
+    [$processo, $documentos] = documentosProcOcr([
+        ProcessoDocumento::OCR_PROCESSADO,
+        ['mimetype' => ''],
+    ]);
+    [$processamento] = abrirProcOcr($processo);
+    $vazio = $documentos[1];
+
+    $this->travel(4)->minutes();
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($vazio, $revelado))->toBe(ResultadoRevelacaoOcr::Enviar);
+
+    $depois = $vazio->fresh();
+
+    expect($depois->mimetype)->toBe($revelado)
+        ->and($vazio->mimetype)->toBe($revelado)
+        ->and($depois->ocr_situacao)->toBeNull()
+        ->and($depois->ocr_erro)->toBeNull()
+        ->and($processamento->fresh()->ultimo_progresso_em)->toBeNull()
+        ->and($processamento->fresh()->situacao)->toBe('em_andamento')
+        ->and(totalAvisosProcOcr())->toBe(0);
+
+    Queue::assertNothingPushed();
+})->with([
+    'PDF' => ['application/pdf'],
+    'HTML' => ['text/html'],
+    'imagem' => ['image/png'],
+]);
+
+it('só 1 vazio pendente revelado vídeo → Ignorado, 1 em_andamento com total T−1 e ignorados I+1 e depois 1 final concluido', function () {
+    [$processo, $documentos] = documentosProcOcr([
+        ProcessoDocumento::OCR_PROCESSADO,
+        ['mimetype' => 'text/html', 'ocr_situacao' => ProcessoDocumento::OCR_PROCESSADO],
+        ['mimetype' => 'audio/mpeg'],
+        ['mimetype' => ''],
+    ]);
+    [$processamento, $assinantes] = abrirProcOcr($processo);
+    $vazio = $documentos[3];
+    $antes = contagemProcOcr($processo);
+
+    expect([$antes->total, $antes->ignorados])->toBe([3, 1]);
+
+    $this->travel(6)->minutes();
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($vazio, 'video/mp4'))->toBe(ResultadoRevelacaoOcr::Ignorado);
+
+    $processamento->refresh();
+
+    expect($vazio->fresh()->mimetype)->toBe('video/mp4')
+        ->and($processamento->situacao)->toBe('concluido')
+        ->and($processamento->ultimo_progresso_em->equalTo(now()))->toBeTrue()
+        ->and($processamento->finalizado_em->equalTo(now()))->toBeTrue();
+
+    foreach ($assinantes as $assinante) {
+        $avisos = avisosProcOcr($assinante);
+
+        expect($avisos)->toHaveCount(2)
+            ->and($avisos[0]->final)->toBeFalse()
+            ->and($avisos[0]->payload)->toMatchArray([
+                'total' => $antes->total - 1,
+                'processados' => 2,
+                'com_erro' => 0,
+                'ignorados' => $antes->ignorados + 1,
+                'situacao' => 'em_andamento',
+            ])
+            ->and($avisos[1]->final)->toBeTrue()
+            ->and($avisos[1]->payload)->toMatchArray([
+                'total' => $antes->total - 1,
+                'ignorados' => $antes->ignorados + 1,
+                'situacao' => 'concluido',
+            ]);
+
+        $avisos->each(fn (ProcessoOcrAviso $aviso) => expectInvariantesAvisoProcOcr($aviso->payload, $processo));
+    }
+});
+
+it('revelado fora da lista com outro documento pendente → 1 aviso em_andamento, e o processamento continua', function () {
+    [$processo, $documentos] = documentosProcOcr([
+        null,
+        ['mimetype' => ''],
+    ]);
+    [$processamento, $assinantes] = abrirProcOcr($processo);
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($documentos[1], 'video/mp4'))->toBe(ResultadoRevelacaoOcr::Ignorado);
+
+    expect($processamento->fresh()->situacao)->toBe('em_andamento')
+        ->and($processamento->fresh()->finalizado_em)->toBeNull();
+
+    foreach ($assinantes as $assinante) {
+        $aviso = avisosProcOcr($assinante)->sole();
+
+        expect($aviso->final)->toBeFalse()
+            ->and($aviso->payload)->toMatchArray(['total' => 1, 'ignorados' => 1, 'situacao' => 'em_andamento']);
+
+        expectInvariantesAvisoProcOcr($aviso->payload, $processo);
+    }
+});
+
+it('revelado vazio → SemMimetype, erro com o texto fixo e com_erro + 1 no aviso', function () {
+    [$processo, $documentos] = documentosProcOcr([
+        null,
+        ['mimetype' => '', 'ocr_situacao' => ProcessoDocumento::OCR_PENDENTE],
+    ]);
+    [$processamento, $assinantes] = abrirProcOcr($processo);
+    $antes = contagemProcOcr($processo);
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($documentos[1], '  '))->toBe(ResultadoRevelacaoOcr::SemMimetype);
+
+    $depois = $documentos[1]->fresh();
+
+    expect($depois->mimetype)->toBe('')
+        ->and($depois->ocr_situacao)->toBe(ProcessoDocumento::OCR_ERRO)
+        ->and($depois->ocr_erro)->toBe('mimetype não informado pelo tribunal')
+        ->and(ProcessamentoOcrService::ERRO_MIMETYPE_NAO_INFORMADO)->toBe('mimetype não informado pelo tribunal')
+        ->and($processamento->fresh()->situacao)->toBe('em_andamento');
+
+    foreach ($assinantes as $assinante) {
+        $aviso = avisosProcOcr($assinante)->sole();
+
+        expect($aviso->payload)->toMatchArray([
+            'total' => $antes->total,
+            'com_erro' => $antes->comErro + 1,
+            'ignorados' => $antes->ignorados,
+            'situacao' => 'em_andamento',
+        ]);
+
+        expectInvariantesAvisoProcOcr($aviso->payload, $processo);
+    }
+});
+
+it('o último documento revelado vazio termina concluido com com_erro > 0', function () {
+    [$processo, $documentos] = documentosProcOcr([
+        ProcessoDocumento::OCR_PROCESSADO,
+        ['mimetype' => ''],
+    ]);
+    [$processamento, [$dono]] = abrirProcOcr($processo, ['tok-dono']);
+
+    servicoProcOcr()->registrarMimetypeRevelado($documentos[1], '');
+
+    expect($processamento->fresh()->situacao)->toBe('concluido')
+        ->and(avisosProcOcr($dono))->toHaveCount(2)
+        ->and(avisosProcOcr($dono)->last()->payload)->toMatchArray([
+            'total' => 2,
+            'processados' => 1,
+            'com_erro' => 1,
+            'situacao' => 'concluido',
+        ]);
+});
+
+it('a 2ª chamada para o mesmo documento já revelado → JaRevelado, sem mudança e com 0 avisos novos', function (string $revelado, ResultadoRevelacaoOcr $primeiro) {
+    [$processo, $documentos] = documentosProcOcr([
+        null,
+        ['mimetype' => ''],
+    ]);
+    [$processamento] = abrirProcOcr($processo);
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($documentos[1], $revelado))->toBe($primeiro);
+
+    $avisos = totalAvisosProcOcr();
+    $documentoAntes = $documentos[1]->fresh()->getAttributes();
+    $progressoAntes = $processamento->fresh()->ultimo_progresso_em;
+
+    $this->travel(2)->minutes();
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($documentos[1]->fresh(), $revelado))->toBe(ResultadoRevelacaoOcr::JaRevelado)
+        ->and(servicoProcOcr()->registrarMimetypeRevelado($documentos[1]->fresh(), ''))->toBe(ResultadoRevelacaoOcr::JaRevelado);
+
+    expect(totalAvisosProcOcr())->toBe($avisos)
+        ->and($documentos[1]->fresh()->getAttributes())->toBe($documentoAntes)
+        ->and($processamento->fresh()->ultimo_progresso_em?->toIso8601String())->toBe($progressoAntes?->toIso8601String());
+})->with([
+    'vídeo' => ['video/mp4', ResultadoRevelacaoOcr::Ignorado],
+    'PDF' => ['application/pdf', ResultadoRevelacaoOcr::Enviar],
+]);
+
+it('mimetype regravado pela lista antes da trava → JaRevelado, sem trocar o valor e com 0 avisos', function () {
+    [$processo, $documentos] = documentosProcOcr([
+        null,
+        ['mimetype' => ''],
+    ]);
+    abrirProcOcr($processo);
+    $lido = $documentos[1];
+
+    // a lista regravou o documento depois da leitura do job
+    ProcessoDocumento::whereKey($lido->id)->update(['mimetype' => 'audio/mpeg']);
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($lido, 'application/pdf'))->toBe(ResultadoRevelacaoOcr::JaRevelado)
+        ->and($lido->fresh()->mimetype)->toBe('audio/mpeg')
+        ->and($lido->mimetype)->toBe('audio/mpeg')
+        ->and(totalAvisosProcOcr())->toBe(0);
+});
+
+it('vazio já em erro revelado vazio de novo → SemMimetype, sem 2º aviso', function () {
+    [$processo, $documentos] = documentosProcOcr([
+        null,
+        ['mimetype' => ''],
+    ]);
+    abrirProcOcr($processo);
+
+    servicoProcOcr()->registrarMimetypeRevelado($documentos[1], '');
+    $avisos = totalAvisosProcOcr();
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($documentos[1]->fresh(), ''))->toBe(ResultadoRevelacaoOcr::SemMimetype)
+        ->and(totalAvisosProcOcr())->toBe($avisos)
+        ->and($avisos)->toBeGreaterThan(0);
+});
+
+it('vazio processado revelado vazio nunca rebaixa e não avisa', function () {
+    [$processo, $documentos] = documentosProcOcr([
+        null,
+        ['mimetype' => '', 'ocr_situacao' => ProcessoDocumento::OCR_PROCESSADO],
+    ]);
+    [$processamento] = abrirProcOcr($processo);
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($documentos[1], ''))->toBe(ResultadoRevelacaoOcr::SemMimetype)
+        ->and($documentos[1]->fresh()->ocr_situacao)->toBe(ProcessoDocumento::OCR_PROCESSADO)
+        ->and($documentos[1]->fresh()->ocr_erro)->toBeNull()
+        ->and($processamento->fresh()->ultimo_progresso_em)->toBeNull()
+        ->and(totalAvisosProcOcr())->toBe(0);
+});
+
+it('sem processamento aberto, o mimetype é gravado com 0 avisos', function (string $revelado, ResultadoRevelacaoOcr $esperado) {
+    [$processo, $documentos] = documentosProcOcr([
+        null,
+        ['mimetype' => ''],
+    ]);
+    [$processamento] = abrirProcOcr($processo);
+    $processamento->update(['situacao' => 'falhou', 'finalizado_em' => now()]);
+
+    expect(servicoProcOcr()->registrarMimetypeRevelado($documentos[1], $revelado))->toBe($esperado)
+        ->and($documentos[1]->fresh()->mimetype)->toBe($revelado)
+        ->and($processamento->fresh()->ultimo_progresso_em)->toBeNull()
+        ->and($processamento->fresh()->situacao)->toBe('falhou')
+        ->and(totalAvisosProcOcr())->toBe(0);
+
+    Queue::assertNothingPushed();
+})->with([
+    'vídeo' => ['video/mp4', ResultadoRevelacaoOcr::Ignorado],
+    'PDF' => ['application/pdf', ResultadoRevelacaoOcr::Enviar],
+    'vazio' => ['', ResultadoRevelacaoOcr::SemMimetype],
+]);
+
+it('a revelação trava primeiro o processamento aberto e depois o documento', function () {
+    [$processo, $documentos] = documentosProcOcr([null, ['mimetype' => '']]);
+    abrirProcOcr($processo);
+
+    DB::enableQueryLog();
+    servicoProcOcr()->registrarMimetypeRevelado($documentos[1], 'video/mp4');
+    $travas = collect(DB::getQueryLog())
+        ->pluck('query')
+        ->filter(fn (string $sql) => str_contains(strtolower($sql), 'for update'))
+        ->values();
+    DB::disableQueryLog();
+
+    expect($travas)->toHaveCount(2)
+        ->and($travas[0])->toContain('processo_ocr_processamentos')
+        ->and($travas[1])->toContain('processo_documentos');
+});
+
+it('a revelação é desfeita junto com os avisos quando a transação falha', function () {
+    [$processo, $documentos] = documentosProcOcr([null, ['mimetype' => '']]);
+    [$processamento] = abrirProcOcr($processo);
+
+    $this->mock(AvisarAssinantesOcrService::class, function ($mock) {
+        $mock->shouldReceive('avisarProgresso')->once()->andThrow(new RuntimeException('falha ao gerar o aviso'));
+    });
+
+    expect(fn () => servicoProcOcr()->registrarMimetypeRevelado($documentos[1], 'video/mp4'))->toThrow(RuntimeException::class);
+
+    expect($documentos[1]->fresh()->mimetype)->toBe('')
+        ->and($processamento->fresh()->ultimo_progresso_em)->toBeNull()
+        ->and(totalAvisosProcOcr())->toBe(0);
+});
+
+it('o log da revelação leva o mimetype, o resultado e o processamento_id', function () {
+    [$processo, $documentos] = documentosProcOcr([null, ['mimetype' => '']]);
+    [$processamento] = abrirProcOcr($processo);
+
+    $logs = [];
+    Event::listen(MessageLogged::class, function (MessageLogged $evento) use (&$logs) {
+        if (str_contains($evento->message, 'mimetype revelado')) {
+            $logs[] = [$evento->message, $evento->context];
+        }
+    });
+
+    servicoProcOcr()->registrarMimetypeRevelado($documentos[1], 'video/mp4');
+
+    expect($logs)->toHaveCount(1)
+        ->and($logs[0][0])->toBe("[ProcessoDocumento:{$documentos[1]->id}] mimetype revelado")
+        ->and($logs[0][1])->toBe([
+            'mimetype' => 'video/mp4',
+            'resultado' => 'ignorado',
+            'processamento_id' => $processamento->id,
+        ]);
+});
+
+// ---------- saída Q-05 (T10; RF-13, DP-07) ----------
+
+it('concluirSeNadaResta sem pendente nem aguardando → concluido, 1 final por assinante e 0 em_andamento', function () {
+    [$processo] = documentosProcOcr([
+        ProcessoDocumento::OCR_PROCESSADO,
+        ProcessoDocumento::OCR_ERRO,
+        ['mimetype' => 'audio/mpeg'],
+    ]);
+    [$processamento, $assinantes] = abrirProcOcr($processo);
+
+    $this->travel(3)->minutes();
+
+    expect(servicoProcOcr()->concluirSeNadaResta($processamento->id))->toBeTrue();
+
+    $processamento->refresh();
+
+    expect($processamento->situacao)->toBe('concluido')
+        ->and($processamento->codigo_falha)->toBeNull()
+        ->and($processamento->finalizado_em->equalTo(now()))->toBeTrue()
+        ->and($processamento->ultimo_progresso_em)->toBeNull();
+
+    foreach ($assinantes as $assinante) {
+        $avisos = avisosProcOcr($assinante);
+
+        expect($avisos)->toHaveCount(1)
+            ->and($avisos->where('final', false))->toHaveCount(0)
+            ->and($avisos->sole()->final)->toBeTrue()
+            ->and($avisos->sole()->payload)->toMatchArray([
+                'total' => 2,
+                'processados' => 1,
+                'com_erro' => 1,
+                'ignorados' => 1,
+                'situacao' => 'concluido',
+            ]);
+
+        expectInvariantesAvisoProcOcr($avisos->sole()->payload, $processo);
+    }
+
+    // idempotente: a 2ª chamada não encerra nem avisa de novo
+    expect(servicoProcOcr()->concluirSeNadaResta($processamento->id))->toBeFalse()
+        ->and(totalAvisosProcOcr())->toBe(count($assinantes));
+});
+
+it('concluirSeNadaResta com pendente ou aguardando → false, em_andamento e 0 avisos', function (string|array|null $restante) {
+    [$processo] = documentosProcOcr([ProcessoDocumento::OCR_PROCESSADO, $restante]);
+    [$processamento] = abrirProcOcr($processo);
+
+    expect(servicoProcOcr()->concluirSeNadaResta($processamento->id))->toBeFalse()
+        ->and($processamento->fresh()->situacao)->toBe('em_andamento')
+        ->and($processamento->fresh()->finalizado_em)->toBeNull()
+        ->and($processamento->fresh()->ultimo_progresso_em)->toBeNull()
+        ->and(totalAvisosProcOcr())->toBe(0);
+
+    Queue::assertNothingPushed();
+})->with([
+    'pendente' => [null],
+    'vazio pendente' => [['mimetype' => '']],
+    'aguardando retorno' => [ProcessoDocumento::OCR_ENVIADO],
+]);
+
+it('concluirSeNadaResta com processamento encerrado ou inexistente → false e 0 avisos', function () {
+    [$processo] = documentosProcOcr([ProcessoDocumento::OCR_PROCESSADO]);
+    [$processamento] = abrirProcOcr($processo);
+    $processamento->update(['situacao' => 'falhou', 'finalizado_em' => now()]);
+
+    expect(servicoProcOcr()->concluirSeNadaResta($processamento->id))->toBeFalse()
+        ->and($processamento->fresh()->situacao)->toBe('falhou')
+        ->and(servicoProcOcr()->concluirSeNadaResta(PHP_INT_MAX))->toBeFalse()
         ->and(totalAvisosProcOcr())->toBe(0);
 });

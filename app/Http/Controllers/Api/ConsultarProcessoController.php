@@ -11,6 +11,7 @@ use App\Jobs\BaixarProcessoMNIJob;
 use App\Models\Processo;
 use App\Models\Tribunal;
 use App\Services\ComunicacaoPJe\ConsultarProcessoService;
+use App\Services\Processo\CamposDosAutosService;
 use App\Services\Processo\JanelaAtualizacaoProcessoService;
 use App\Services\Processo\ProcessoService;
 use Illuminate\Http\JsonResponse;
@@ -24,16 +25,19 @@ class ConsultarProcessoController extends Controller
     private ProcessoService $processoService;
     private ConsultarProcessoService $consultarProcessoService;
     private JanelaAtualizacaoProcessoService $janela;
+    private CamposDosAutosService $camposDosAutos;
     private const DEFAULT_PER_PAGE = 10;
 
     public function __construct(
         ProcessoService $processoService,
         ConsultarProcessoService $consultarProcessoService,
-        JanelaAtualizacaoProcessoService $janela
+        JanelaAtualizacaoProcessoService $janela,
+        CamposDosAutosService $camposDosAutos
     ) {
         $this->processoService = $processoService;
         $this->consultarProcessoService = $consultarProcessoService;
         $this->janela = $janela;
+        $this->camposDosAutos = $camposDosAutos;
     }
 
     public function index(Request $request): JsonResponse
@@ -85,8 +89,25 @@ class ConsultarProcessoController extends Controller
                 'classe',
                 'assuntos',
                 'movimentos',
+                // DEP-07 (a): os campos dos autos. `id` e `processo_id` ficam
+                // ocultos, e `ocr_situacao` só é mostrada calculada (RF-03).
                 'documentos' => function ($q) {
-                    $q->select('id', 'id_documento', 'descricao', 'id_documento_vinculado', 'movimento', 'tipo_documento', 'data_hora', 'nivel_sigilo', 'processo_id');
+                    $q->select(
+                        'id',
+                        'id_documento',
+                        'descricao',
+                        'id_documento_vinculado',
+                        'movimento',
+                        'tipo_documento',
+                        'data_hora',
+                        'nivel_sigilo',
+                        'data_juntada',
+                        'usuario_juntada_arquivo',
+                        'mimetype',
+                        'file_size',
+                        'ocr_situacao',
+                        'processo_id'
+                    );
                 },
             ];
 
@@ -122,6 +143,10 @@ class ConsultarProcessoController extends Controller
                 // e o expediente seguem com 1 job por chamada (RF-16, Q-02).
                 BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo, $request->login_pje, $request->senha_pje);
             }
+
+            // Nos 2 caminhos: `tipo` em 1 consulta e a situação do OCR
+            // calculada só para esta resposta (RF-01 a RF-03).
+            $this->camposDosAutos->preparar($processo);
 
             return response()->json($processo);
         } catch (MNIException $e) {

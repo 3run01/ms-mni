@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /*
@@ -915,4 +916,191 @@ it('o DTO do pedido marca o par e o callback_token como sensíveis e os mascara 
         ->and($despejo)->not->toContain(LOGIN_DONO_SOL_OCR)
         ->and($despejo)->not->toContain(SENHA_DONO_SOL_OCR)
         ->and($despejo)->not->toContain(TOKEN_CALLBACK_DONO_SOL_OCR);
+});
+
+// ---------- T08: o mimetype vazio no pedido (RF-08, RF-13 atalho do pedido) ----------
+
+/**
+ * Os contextos dos logs `jobs do pedido despachados`, em `->contextos`.
+ */
+function capturarLogsDeDespachoSolOcr(): stdClass
+{
+    $capturados = new stdClass();
+    $capturados->contextos = [];
+
+    Event::listen(MessageLogged::class, function (MessageLogged $evento) use ($capturados) {
+        if (str_contains($evento->message, 'jobs do pedido despachados')) {
+            $capturados->contextos[] = $evento->context;
+        }
+    });
+
+    return $capturados;
+}
+
+/**
+ * Só a consulta da lista vai ao tribunal no pedido: nenhum download SOAP.
+ */
+function operacoesSoapSolOcr(stdClass $mni): array
+{
+    return array_column($mni->requisicoes, 'operacao');
+}
+
+it('1 PDF processado e 1 vazio pendente → em_andamento, total 2, processados 1, ignorados 0, 1 download e 0 envio', function () {
+    $logs = capturarLogsDeDespachoSolOcr();
+    [, $documentos] = processoSolOcr($this->tribunal, [
+        ProcessoDocumento::OCR_PROCESSADO,
+        ['mimetype' => '', 'ocr_situacao' => null, 'status' => ProcessoDocumento::STATUS_PENDENTE],
+    ]);
+    $mni = mniSolOcr($documentos);
+
+    $dados = dadosSolOcr($this->tribunal);
+    $resultado = solicitarSolOcr($dados);
+
+    expect($resultado->paraCorpo())->toBe([
+        'numero_processo' => NUMERO_SOL_OCR,
+        'tribunal_id' => $this->tribunal->id,
+        'total' => 2,
+        'processados' => 1,
+        'com_erro' => 0,
+        'ignorados' => 0,
+        'situacao' => 'em_andamento',
+    ]);
+    conferirInvarianteSolOcr($resultado, $this->tribunal);
+
+    expect(idsDosJobsSolOcr(BaixarDocumentoParaOcrJob::class))->toBe([$documentos[1]->id]);
+    Queue::assertPushedOn(BaixarDocumentoParaOcrJob::FILA, BaixarDocumentoParaOcrJob::class);
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+
+    // cifrado e com o par do dono
+    Queue::assertPushed(BaixarDocumentoParaOcrJob::class, fn (BaixarDocumentoParaOcrJob $job) => $job->processamentoId === $resultado->processamentoId
+        && $job instanceof \Illuminate\Contracts\Queue\ShouldBeEncrypted
+        && parDoJobDownloadSolOcr($job) === [LOGIN_DONO_SOL_OCR, SENHA_DONO_SOL_OCR]);
+
+    expect(operacoesSoapSolOcr($mni))->toBe(['consultarProcesso'])
+        ->and($documentos[1]->fresh()->mimetype)->toBe('');
+
+    // o log do despacho conta o vazio, sem o par
+    expect($logs->contextos)->toHaveCount(1)
+        ->and($logs->contextos[0])->toMatchArray([
+            'downloads' => 1,
+            'downloads_sem_mimetype' => 1,
+            'envios' => 0,
+        ])
+        ->and(json_encode($logs->contextos[0]))->not->toContain(LOGIN_DONO_SOL_OCR)
+        ->and(json_encode($logs->contextos[0]))->not->toContain(SENHA_DONO_SOL_OCR);
+});
+
+it('vazio pendente já baixado com path .dat no S3 → 1 download e 0 envio', function () {
+    Storage::fake('s3');
+    $path = 'documentos-processos/'.NUMERO_SOL_OCR.'/sol-vazio.dat';
+    Storage::disk('s3')->put($path, 'binario-sem-mimetype');
+
+    [, $documentos] = processoSolOcr($this->tribunal, [[
+        'mimetype' => '',
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => $path,
+    ]]);
+    $mni = mniSolOcr($documentos);
+
+    $resultado = solicitarSolOcr(dadosSolOcr($this->tribunal));
+
+    expect($resultado->situacao)->toBe('em_andamento')
+        ->and($resultado->total)->toBe(1)
+        ->and($resultado->ignorados)->toBe(0)
+        ->and(idsDosJobsSolOcr(BaixarDocumentoParaOcrJob::class))->toBe([$documentos[0]->id])
+        ->and(operacoesSoapSolOcr($mni))->toBe(['consultarProcesso']);
+
+    Queue::assertPushedOn(BaixarDocumentoParaOcrJob::FILA, BaixarDocumentoParaOcrJob::class);
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+});
+
+it('vazio com erro volta a pendente, gera 1 download e o pedido sai com com_erro 0', function () {
+    [, $documentos] = processoSolOcr($this->tribunal, [
+        ProcessoDocumento::OCR_PROCESSADO,
+        [
+            'mimetype' => '',
+            'ocr_situacao' => ProcessoDocumento::OCR_ERRO,
+            'ocr_erro' => 'mimetype não informado pelo tribunal',
+            'ocr_job_id' => 'job-antigo-vazio-sol',
+        ],
+    ]);
+    mniSolOcr($documentos);
+
+    $resultado = solicitarSolOcr(dadosSolOcr($this->tribunal));
+
+    expect($resultado->paraCorpo())->toMatchArray([
+        'total' => 2,
+        'processados' => 1,
+        'com_erro' => 0,
+        'ignorados' => 0,
+        'situacao' => 'em_andamento',
+    ]);
+    conferirInvarianteSolOcr($resultado, $this->tribunal);
+
+    $vazio = $documentos[1]->fresh();
+
+    expect($vazio->ocr_situacao)->toBe(ProcessoDocumento::OCR_PENDENTE)
+        ->and($vazio->ocr_erro)->toBeNull()
+        ->and($vazio->ocr_job_id)->toBeNull()
+        ->and($vazio->ocr_job_id_cancelar)->toBe('job-antigo-vazio-sol')
+        ->and($vazio->mimetype)->toBe('')
+        ->and(idsDosJobsSolOcr(BaixarDocumentoParaOcrJob::class))->toBe([$vazio->id]);
+
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+});
+
+it('só vazios pendentes → abre o processamento em_andamento, e não concluido', function () {
+    [, $documentos] = processoSolOcr($this->tribunal, [
+        ['mimetype' => ''],
+        ['mimetype' => '', 'status' => ProcessoDocumento::STATUS_BAIXADO, 'path' => 'documentos-processos/'.NUMERO_SOL_OCR.'/so-vazio.dat'],
+    ]);
+    mniSolOcr($documentos);
+
+    $resultado = solicitarSolOcr(dadosSolOcr($this->tribunal));
+
+    expect($resultado->paraCorpo())->toMatchArray([
+        'total' => 2,
+        'processados' => 0,
+        'com_erro' => 0,
+        'ignorados' => 0,
+        'situacao' => 'em_andamento',
+    ])
+        ->and($resultado->processamentoId)->not->toBeNull()
+        ->and(linhasOcrSolOcr($this->tribunal))->toBe(['processamentos' => 1, 'abertos' => 1, 'assinantes' => 1])
+        ->and(idsDosJobsSolOcr(BaixarDocumentoParaOcrJob::class))->toBe($documentos->pluck('id')->sort()->values()->all());
+
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+});
+
+it('PDF baixado com path continua indo direto a ocr-envio, com 0 SOAP além da lista', function () {
+    [, $documentos] = processoSolOcr($this->tribunal, [[
+        'mimetype' => 'application/pdf',
+        'status' => ProcessoDocumento::STATUS_BAIXADO,
+        'path' => 'documentos-processos/'.NUMERO_SOL_OCR.'/sol-pdf-baixado.pdf',
+    ]]);
+    $mni = mniSolOcr($documentos);
+
+    $resultado = solicitarSolOcr(dadosSolOcr($this->tribunal));
+
+    expect($resultado->situacao)->toBe('em_andamento')
+        ->and(idsDosJobsSolOcr(EnviarDocumentoAoOcrJob::class))->toBe([$documentos[0]->id])
+        ->and(operacoesSoapSolOcr($mni))->toBe(['consultarProcesso']);
+
+    Queue::assertPushedOn(EnviarDocumentoAoOcrJob::FILA, EnviarDocumentoAoOcrJob::class);
+    Queue::assertNotPushed(BaixarDocumentoParaOcrJob::class);
+});
+
+it('mídia baixada com path nunca vai ao envio nem ao download pelo pedido (RF-13)', function () {
+    [, $documentos] = processoSolOcr($this->tribunal, [
+        ['mimetype' => 'audio/mpeg', 'status' => ProcessoDocumento::STATUS_BAIXADO, 'path' => 'documentos-processos/'.NUMERO_SOL_OCR.'/sol-audio.mp3'],
+        ['mimetype' => 'application/pdf'],
+    ]);
+    mniSolOcr($documentos);
+
+    $resultado = solicitarSolOcr(dadosSolOcr($this->tribunal));
+
+    expect($resultado->paraCorpo())->toMatchArray(['total' => 1, 'ignorados' => 1, 'situacao' => 'em_andamento'])
+        ->and(idsDosJobsSolOcr(BaixarDocumentoParaOcrJob::class))->toBe([$documentos[1]->id]);
+
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
 });

@@ -180,6 +180,67 @@ class SalvarDocumentoProcessoService
         // }
     }
 
+    /**
+     * Download do OCR para o documento com mimetype não informado (RF-09;
+     * DP-06, passo 1).
+     *
+     * Faz 1 consulta ao tribunal com o par recebido, mesmo que o documento já
+     * esteja `baixado` com objeto no S3 (o `.dat` do vazio não diz o que o
+     * documento é), e lê o mimetype que o tribunal informa na resposta. A
+     * fonte é só essa resposta: o tipo não é inferido do binário, porque o
+     * erro de RF-12 é "mimetype não informado pelo tribunal".
+     *
+     * Grava o binário no S3 pela regra do mimetype revelado, sem trocar o
+     * atributo `mimetype` do model, e marca `baixado`:
+     * - `text/html` → `{id}.pdf` em `path` e `{id}.html` em `path_html`;
+     * - `application/pdf` → `{id}.pdf`;
+     * - `audio/*` → `{id}.{ext}`;
+     * - o resto, vídeo e `''` inclusive → `{id}.{ext}`, com `dat` para tipo
+     *   desconhecido e para o vazio. Não passa por salvarConteudo(), que
+     *   recusa vídeo, e não faz 2ª chamada.
+     *
+     * Não grava o mimetype: isso fica com
+     * ProcessamentoOcrService::registrarMimetypeRevelado, sob as travas do
+     * processamento e do documento (RNF-05). SOAP e S3 não seguram travas do
+     * banco.
+     *
+     * A recusa do par e o processo inexistente sobem sem embrulho. O resto
+     * vai embrulhado, como em downloadOutros, com a falha original como
+     * `previous`. Numa falha, o documento não muda.
+     *
+     * @return string o mimetype revelado, sem espaços nas pontas (`''` quando
+     *                o tribunal não o informa)
+     */
+    public function baixarRevelandoMimetype(
+        ProcessoDocumento $documento,
+        #[\SensitiveParameter] ?string $login,
+        #[\SensitiveParameter] ?string $senha,
+    ): string {
+        try {
+            $documentoMni = $this->consultarDocumento($documento, $login, $senha);
+
+            $revelado = trim((string) ($documentoMni->mimetype ?? ''));
+
+            if ($revelado === 'text/html') {
+                $path = $this->salvarConteudoHtml($documento, $documentoMni);
+            } elseif ($revelado === 'application/pdf') {
+                $path = $this->salvarConteudoPdf($documento, $documentoMni);
+            } elseif (str_starts_with($revelado, 'audio/')) {
+                $path = $this->salvarConteudoAudio($documento, $documentoMni, $revelado);
+            } else {
+                $path = $this->salvarConteudoOutros($documento, $documentoMni, $revelado);
+            }
+        } catch (CredencialPjeRecusadaException|ProcessoNaoEncontradoNoTribunalException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            throw new \Exception('Erro ao processar documento sem mimetype: ' . $e->getMessage(), 0, $e);
+        }
+
+        $this->marcarComoBaixado($documento, $path);
+
+        return $revelado;
+    }
+
     public function marcarComoBaixado(ProcessoDocumento $documento, string $path, ?int $fileSize = null): void
     {
         $documento->status = ProcessoDocumento::STATUS_BAIXADO;
@@ -382,7 +443,12 @@ class SalvarDocumentoProcessoService
         }
     }
 
-    public function salvarConteudoOutros($documento, $documentoMNI): string
+    /**
+     * `$mimetype` escolhe a extensão no lugar do mimetype gravado: é o
+     * revelado pelo tribunal no download do OCR (RF-09). Com `null`, vale o
+     * gravado, como no lote e nos download*.
+     */
+    public function salvarConteudoOutros($documento, $documentoMNI, ?string $mimetype = null): string
     {
         if (empty($documentoMNI->conteudo)) {
             throw new \Exception('Conteúdo do documento está vazio');
@@ -394,7 +460,7 @@ class SalvarDocumentoProcessoService
         }
 
         $pasta = "documentos-processos";
-        $extensao = $this->getFileExtension($documento->mimetype);
+        $extensao = $this->getFileExtension($mimetype ?? $documento->mimetype);
         $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . "." . $extensao;
 
         if (!Storage::disk('s3')->put($filename, $conteudoDecodificado)) {
@@ -757,8 +823,14 @@ class SalvarDocumentoProcessoService
         }
     }
 
-    public function salvarConteudoAudio($documento, $documentoMNI): string
+    /**
+     * `$mimetype`: o revelado pelo tribunal no download do OCR (RF-09); com
+     * `null`, vale o gravado, como no lote e em downloadAudio.
+     */
+    public function salvarConteudoAudio($documento, $documentoMNI, ?string $mimetype = null): string
     {
+        $mimetype ??= $documento->mimetype;
+
         if (empty($documentoMNI->conteudo)) {
             throw new \Exception('Conteúdo do áudio está vazio');
         }
@@ -812,7 +884,7 @@ class SalvarDocumentoProcessoService
         }
 
         $pasta = "documentos-processos";
-        $extensao = $this->getFileExtension($documento->mimetype);
+        $extensao = $this->getFileExtension($mimetype);
         $filename = $pasta . "/" . $documento->processo->numero_processo . "/" . $documento->id_documento . "." . $extensao;
 
         if (!Storage::disk('s3')->put($filename, $conteudoDocumento)) {
@@ -821,7 +893,7 @@ class SalvarDocumentoProcessoService
 
         Log::info('Áudio salvo com sucesso', [
             'filename' => $filename,
-            'mimetype' => $documento->mimetype,
+            'mimetype' => $mimetype,
             'size' => strlen($conteudoDocumento),
             'signature' => $signatureHex,
             'valid' => $isValidAudio

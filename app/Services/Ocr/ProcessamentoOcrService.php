@@ -31,6 +31,12 @@ class ProcessamentoOcrService
     /** Tamanho da coluna `processo_documentos.ocr_erro`. */
     public const TAMANHO_MAXIMO_ERRO = 1000;
 
+    /**
+     * `ocr_erro` do documento cujo mimetype o tribunal não informou nem na
+     * lista nem no download (RF-12). Texto fixo: o Sistema o mostra ao membro.
+     */
+    public const ERRO_MIMETYPE_NAO_INFORMADO = 'mimetype não informado pelo tribunal';
+
     /** Tamanho da coluna `processo_documentos.ocr_job_id`. */
     private const TAMANHO_MAXIMO_JOB_ID = 64;
 
@@ -201,6 +207,113 @@ class ProcessamentoOcrService
                 $this->progredir($aberto);
             }
         });
+    }
+
+    /**
+     * Grava o mimetype revelado pelo download do OCR e decide o que fazer com
+     * o documento (RF-10 a RF-12; DP-06, passo 2). Roda pelas travas de D6,
+     * primeiro o processamento aberto e depois o documento, e os avisos saem
+     * depois do commit (RNF-05).
+     *
+     * Com o documento relido sob a trava:
+     * - mimetype já não vazio → `JaRevelado`: nada muda e nada é avisado. Uma
+     *   2ª execução do job pela mesma revelação não gera 2º aviso nem 2º
+     *   envio, e o valor regravado pela lista não é trocado;
+     * - senão, grava o revelado quando ele não é vazio e decide por ele:
+     *   - legível → `Enviar`. Não é progresso: não grava `ultimo_progresso_em`
+     *     e não avisa até o retorno do workflow (RF-10);
+     *   - conhecido e fora da lista → `Ignorado`. O documento sai de `total`
+     *     e conta em `ignorados`; é progresso do processamento aberto, com
+     *     aviso, P renovado e o final `concluido` se nada mais resta (RF-11);
+     *   - `''` → `SemMimetype`. Erro definitivo neste processamento, com o
+     *     texto fixo em `ocr_erro`, e progresso com aviso (RF-12). Um
+     *     processado nunca rebaixa, e um `erro` já gravado não avisa de novo.
+     *
+     * Sem processamento aberto, o documento muda do mesmo jeito, com 0
+     * avisos. Se o `ocr_job_id` mudou desde a leitura de quem chama, outro
+     * caminho já cuidou do documento: `JaRevelado`, sem mudança.
+     */
+    public function registrarMimetypeRevelado(ProcessoDocumento $documento, string $mimetype): ResultadoRevelacaoOcr
+    {
+        $mimetype = trim($mimetype);
+        $processamentoId = null;
+
+        $resultado = $this->comTravas(
+            $documento,
+            ResultadoRevelacaoOcr::JaRevelado,
+            function (ProcessoDocumento $travado, ?ProcessoOcrProcessamento $aberto) use ($mimetype, &$processamentoId) {
+                $processamentoId = $aberto?->id;
+
+                if ($travado->mimetype !== FormatosOcr::MIMETYPE_NAO_INFORMADO) {
+                    return ResultadoRevelacaoOcr::JaRevelado;
+                }
+
+                if ($mimetype !== FormatosOcr::MIMETYPE_NAO_INFORMADO) {
+                    $travado->update(['mimetype' => $mimetype]);
+                }
+
+                if (FormatosOcr::ehLegivel($mimetype)) {
+                    return ResultadoRevelacaoOcr::Enviar;
+                }
+
+                if ($mimetype !== FormatosOcr::MIMETYPE_NAO_INFORMADO) {
+                    if ($aberto !== null) {
+                        $this->progredir($aberto);
+                    }
+
+                    return ResultadoRevelacaoOcr::Ignorado;
+                }
+
+                $mudou = ! in_array($travado->ocr_situacao, [ProcessoDocumento::OCR_ERRO, ProcessoDocumento::OCR_PROCESSADO], true);
+
+                if ($mudou) {
+                    $travado->update([
+                        'ocr_situacao' => ProcessoDocumento::OCR_ERRO,
+                        'ocr_erro' => self::ERRO_MIMETYPE_NAO_INFORMADO,
+                    ]);
+
+                    if ($aberto !== null) {
+                        $this->progredir($aberto);
+                    }
+                }
+
+                return ResultadoRevelacaoOcr::SemMimetype;
+            },
+        );
+
+        // Só o mimetype, o resultado e os ids: nunca o par nem o texto cru do
+        // tribunal (RNF-01).
+        Log::info("[ProcessoDocumento:{$documento->id}] mimetype revelado", [
+            'mimetype' => $mimetype,
+            'resultado' => $resultado->value,
+            'processamento_id' => $processamentoId,
+        ]);
+
+        return $resultado;
+    }
+
+    /**
+     * Saída do job do OCR que encontra um mimetype não vazio fora da lista
+     * que não foi revelado nele, por exemplo regravado pela lista enquanto o
+     * documento esperava na fila (RF-13, decisão Q-05; DP-07).
+     *
+     * Trava o processamento. Em andamento, sem pendente e sem aguardando
+     * retorno, termina `concluido`, com o aviso final. Não é progresso: não
+     * grava `ultimo_progresso_em` e não gera aviso `em_andamento`.
+     * Idempotente: só a 1ª chamada que encontra nada a fazer encerra.
+     *
+     * @return bool false quando ainda resta pendente ou aguardando retorno, ou
+     *              quando o processamento já não estava em andamento
+     */
+    public function concluirSeNadaResta(int $processamentoId): bool
+    {
+        return $this->encerrar(
+            $processamentoId,
+            fn (ContagemOcr $contagem) => $contagem->pendentes + $contagem->aguardando > 0
+                ? null
+                : [ProcessoOcrProcessamento::SITUACAO_CONCLUIDO, null],
+            'concluído sem nada a ler depois de um mimetype fora da lista',
+        );
     }
 
     /**
@@ -376,7 +489,10 @@ class ProcessamentoOcrService
     }
 
     /**
-     * @param  Closure(ContagemOcr): array{0: string, 1: ?string}  $desfecho  situação e código
+     * `$desfecho` devolve a situação e o código do fim, ou `null` para não
+     * encerrar (o processamento segue em andamento, sem aviso).
+     *
+     * @param  Closure(ContagemOcr): (array{0: string, 1: ?string}|null)  $desfecho
      */
     private function encerrar(int $processamentoId, Closure $desfecho, string $evento): bool
     {
@@ -391,7 +507,13 @@ class ProcessamentoOcrService
             }
 
             $contagem = $this->contagem->contar($processamento->processo_id);
-            [$situacao, $codigo] = $desfecho($contagem);
+            $fim = $desfecho($contagem);
+
+            if ($fim === null) {
+                return false;
+            }
+
+            [$situacao, $codigo] = $fim;
 
             $this->finalizar($processamento, $situacao, $codigo, $contagem);
 
