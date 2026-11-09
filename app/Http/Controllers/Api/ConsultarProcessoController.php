@@ -11,6 +11,7 @@ use App\Jobs\BaixarProcessoMNIJob;
 use App\Models\Processo;
 use App\Models\Tribunal;
 use App\Services\ComunicacaoPJe\ConsultarProcessoService;
+use App\Services\Processo\JanelaAtualizacaoProcessoService;
 use App\Services\Processo\ProcessoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,12 +23,17 @@ class ConsultarProcessoController extends Controller
 {
     private ProcessoService $processoService;
     private ConsultarProcessoService $consultarProcessoService;
+    private JanelaAtualizacaoProcessoService $janela;
     private const DEFAULT_PER_PAGE = 10;
 
-    public function __construct(ProcessoService $processoService, ConsultarProcessoService $consultarProcessoService)
-    {
+    public function __construct(
+        ProcessoService $processoService,
+        ConsultarProcessoService $consultarProcessoService,
+        JanelaAtualizacaoProcessoService $janela
+    ) {
         $this->processoService = $processoService;
         $this->consultarProcessoService = $consultarProcessoService;
+        $this->janela = $janela;
     }
 
     public function index(Request $request): JsonResponse
@@ -99,11 +105,21 @@ class ConsultarProcessoController extends Controller
                     $request->senha_pje ?? null
                 );
 
+                // A consulta síncrona que voltou sem exceção acabou de trazer o
+                // processo do tribunal: abre a janela, sem job, para a próxima
+                // abertura não repetir o acesso (DEP-08, decisão Q-03). Uma
+                // falha lança antes daqui e não abre nada.
+                $this->janela->abrir((int) $request->tribunal_id, $numero_processo);
+
                 $processo = Processo::with($with)
                     ->where('numero_processo', $numero_processo)
                     ->where('tribunal_id', $request->tribunal_id)
                     ->first();
-            } else {
+            } elseif ($this->janela->abrir((int) $request->tribunal_id, $numero_processo)) {
+                // Só esta rota passa pela janela (DEP-08, RF-15): no máximo 1
+                // atualização em segundo plano por linha e número a cada 600 s,
+                // com o par da chamada que abriu a janela. /processo/consultar
+                // e o expediente seguem com 1 job por chamada (RF-16, Q-02).
                 BaixarProcessoMNIJob::dispatch(Tribunal::find($request->tribunal_id), $numero_processo, $request->login_pje, $request->senha_pje);
             }
 

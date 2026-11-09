@@ -30,8 +30,8 @@ function processoContagemOcr(array $documentos, ?Processo $processo = null): Pro
 
 /**
  * Invariantes de RF-08 em toda contagem: `processados + com_erro ≤ total`,
- * `total + ignorados` = documentos do processo no banco e cada legível numa
- * só situação.
+ * `total + ignorados` = documentos do processo no banco e cada documento do
+ * conjunto do total (legível ou vazio, RF-07) numa só situação.
  */
 function expectInvariantesContagemOcr(ContagemOcr $contagem, Processo $processo): void
 {
@@ -121,15 +121,91 @@ it('situação do OCR em documento não legível não entra nas contagens dos le
 
     $contagem = app(ContagemOcrService::class)->contar($processo->id);
 
-    expect($contagem->total)->toBe(1)
+    // O `''` (mimetype não informado) entra em `total` como pendente (RF-07):
+    // só o mimetype conhecido fora da lista conta em `ignorados`.
+    expect($contagem->total)->toBe(2)
         ->and($contagem->processados)->toBe(1)
         ->and($contagem->comErro)->toBe(0)
         ->and($contagem->aguardando)->toBe(0)
-        ->and($contagem->pendentes)->toBe(0)
-        ->and($contagem->ignorados)->toBe(4);
+        ->and($contagem->pendentes)->toBe(1)
+        ->and($contagem->ignorados)->toBe(3);
 
     expectInvariantesContagemOcr($contagem, $processo);
 });
+
+// ---------- RF-07: o mimetype vazio no conjunto do total ----------
+
+it('1 PDF, 1 vazio, 1 MP4 e 1 MP3, todos sem situação, dão total 2, pendentes 2 e ignorados 2', function () {
+    $processo = processoContagemOcr([
+        ['application/pdf', null],
+        ['', null],
+        ['video/mp4', null],
+        ['audio/mpeg', null],
+    ]);
+
+    $contagem = app(ContagemOcrService::class)->contar($processo->id);
+
+    expect($contagem)->toEqual(new ContagemOcr(
+        total: 2,
+        processados: 0,
+        comErro: 0,
+        ignorados: 2,
+        pendentes: 2,
+        aguardando: 0,
+    ))->and($contagem->paraCorpo())->toBe([
+        'total' => 2,
+        'processados' => 0,
+        'com_erro' => 0,
+        'ignorados' => 2,
+    ]);
+
+    expectInvariantesContagemOcr($contagem, $processo);
+});
+
+it('o vazio com erro conta em total e em com_erro, e não em ignorados', function () {
+    $processo = processoContagemOcr([
+        ['', ProcessoDocumento::OCR_ERRO],
+    ]);
+
+    $contagem = app(ContagemOcrService::class)->contar($processo->id);
+
+    expect($contagem->total)->toBe(1)
+        ->and($contagem->comErro)->toBe(1)
+        ->and($contagem->ignorados)->toBe(0)
+        ->and($contagem->pendentes)->toBe(0)
+        ->and($contagem->processados)->toBe(0)
+        ->and($contagem->aguardando)->toBe(0);
+
+    expectInvariantesContagemOcr($contagem, $processo);
+});
+
+it('o vazio segue a situação do OCR como um legível e nunca conta em ignorados', function (?string $situacao, string $contagemDaSituacao) {
+    $processo = processoContagemOcr([
+        ['', $situacao],
+    ]);
+
+    $contagem = app(ContagemOcrService::class)->contar($processo->id);
+
+    $esperado = ['processados' => 0, 'comErro' => 0, 'pendentes' => 0, 'aguardando' => 0];
+    $esperado[$contagemDaSituacao] = 1;
+
+    expect($contagem->total)->toBe(1)
+        ->and($contagem->ignorados)->toBe(0)
+        ->and([
+            'processados' => $contagem->processados,
+            'comErro' => $contagem->comErro,
+            'pendentes' => $contagem->pendentes,
+            'aguardando' => $contagem->aguardando,
+        ])->toBe($esperado);
+
+    expectInvariantesContagemOcr($contagem, $processo);
+})->with([
+    'null' => [null, 'pendentes'],
+    'pendente' => [ProcessoDocumento::OCR_PENDENTE, 'pendentes'],
+    'enviado' => [ProcessoDocumento::OCR_ENVIADO, 'aguardando'],
+    'processado' => [ProcessoDocumento::OCR_PROCESSADO, 'processados'],
+    'erro' => [ProcessoDocumento::OCR_ERRO, 'comErro'],
+]);
 
 it('conta só os documentos do processo informado', function () {
     $processo = processoContagemOcr([
@@ -193,6 +269,25 @@ it('mantém as invariantes de RF-08 em todo cenário', function (array $document
         ['video/mp4', ProcessoDocumento::OCR_PROCESSADO],
         ['audio/mpeg', null],
         ['', null],
+    ]],
+    'vazio em cada situação e em null' => [[
+        ['', null],
+        ['', ProcessoDocumento::OCR_PENDENTE],
+        ['', ProcessoDocumento::OCR_ENVIADO],
+        ['', ProcessoDocumento::OCR_PROCESSADO],
+        ['', ProcessoDocumento::OCR_ERRO],
+    ]],
+    'vazio em cada situação com legíveis e ignorados' => [[
+        ['', null],
+        ['', ProcessoDocumento::OCR_PENDENTE],
+        ['', ProcessoDocumento::OCR_ENVIADO],
+        ['', ProcessoDocumento::OCR_PROCESSADO],
+        ['', ProcessoDocumento::OCR_ERRO],
+        ['application/pdf', ProcessoDocumento::OCR_PROCESSADO],
+        ['text/html', null],
+        ['video/mp4', ProcessoDocumento::OCR_ERRO],
+        ['audio/mpeg', null],
+        ['application/zip', ProcessoDocumento::OCR_PENDENTE],
     ]],
 ]);
 
