@@ -44,6 +44,7 @@ const LOGIN_REENVIO_OCR_JOB = 'login-reenvio-2f6';
 const SENHA_REENVIO_OCR_JOB = 'senha-reenvio-4a9';
 
 beforeEach(function () {
+    isolarAvisosOcrDoBancoDeDev();
     Queue::fake([EnviarAvisoOcrJob::class]);
     $this->freezeSecond();
     Storage::fake('s3');

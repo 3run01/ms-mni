@@ -154,3 +154,22 @@ function simularIntegracaoMni(Closure $responder): stdClass
 
     return $registro;
 }
+
+/**
+ * Esvazia `processo_ocr_avisos` dentro da transação do teste.
+ *
+ * Os testes rodam no banco do `.env`, o mesmo do container de dev, dentro de
+ * DatabaseTransactions. A homologação do OCR deixa lá avisos reais, e os
+ * testes que contam avisos (`ProcessoOcrAviso::count()`, os finais de um
+ * pedido) esperam partir de 0. O delete roda na transação do teste e o
+ * rollback o desfaz: o banco de dev não perde nada. Fora de uma transação
+ * ele apagaria dados de verdade, então recusa.
+ */
+function isolarAvisosOcrDoBancoDeDev(): void
+{
+    if (\Illuminate\Support\Facades\DB::transactionLevel() === 0) {
+        throw new LogicException('isolarAvisosOcrDoBancoDeDev() só roda dentro de DatabaseTransactions.');
+    }
+
+    \App\Models\ProcessoOcrAviso::query()->delete();
+}

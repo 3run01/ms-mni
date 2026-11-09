@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Queue;
 uses(DatabaseTransactions::class);
 
 beforeEach(function () {
+    isolarAvisosOcrDoBancoDeDev();
     Queue::fake();
     $this->freezeSecond();
 });

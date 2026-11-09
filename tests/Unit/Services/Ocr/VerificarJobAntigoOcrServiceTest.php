@@ -30,6 +30,7 @@ const TOKEN_WORKFLOW_VERIFICAR_JOB_OCR = 'token-workflow-verificar-1a8';
 const JOB_ANTIGO_VERIFICAR_JOB_OCR = '3b1f7c2d-8e4a-4f6b-9c0d-1e2f3a4b5c6d';
 
 beforeEach(function () {
+    isolarAvisosOcrDoBancoDeDev();
     Queue::fake();
     $this->freezeSecond();
 

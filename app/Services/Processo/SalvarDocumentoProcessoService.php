@@ -7,7 +7,9 @@ use App\Exceptions\MNIException;
 use App\Exceptions\ProcessoNaoEncontradoNoTribunalException;
 use App\Models\ProcessoDocumento;
 use App\Services\MNI\Intercomunicacao\ConsultarDocumentoService;
+use App\Services\Ocr\FormatosOcr;
 use Carbon\Carbon;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Crypt;
@@ -54,26 +56,44 @@ class SalvarDocumentoProcessoService
      */
     public function salvarDocumento($processo, $documento, #[\SensitiveParameter] $login_pje = null, #[\SensitiveParameter] $senha_pje = null, bool $baixar_binarios = true)
     {
-        $processoDocumento = ProcessoDocumento::updateOrCreate(
-            [
-                'processo_id' => $processo->id,
-                'id_documento' => $documento->idDocumento,
-            ],
-            [
-                'id_documento_vinculado' => !empty($documento->idDocumentoVinculado) ? $documento->idDocumentoVinculado : null,
-                'tipo_documento' => isset($documento->tipoDocumento) ? $documento->tipoDocumento : null,
-                'data_hora' => isset($documento->dataHora) ? Carbon::parse($documento->dataHora)->format('Y-m-d H:i:s') : null,
-                'mimetype' => isset($documento->mimetype) ? $documento->mimetype : null,
-                'movimento' => !empty($documento->movimento) ? $documento->movimento : null,
-                'hash' => isset($documento->hash) ? $documento->hash : null,
-                'nivel_sigilo' => !empty($documento->nivelSigilo) ? $documento->nivelSigilo : null,
-                'descricao' => isset($documento->descricao) ? $documento->descricao : null,
-                'usuario_juntada_arquivo' => $this->extrairOutroParametro($documento, 'pessoaJuntadaArquivo'),
-                'data_juntada' => $this->extrairDataJuntada($documento),
-            ]
-        );
+        $chave = [
+            'processo_id' => $processo->id,
+            'id_documento' => $documento->idDocumento,
+        ];
 
-        return $processoDocumento;
+        $valores = [
+            'id_documento_vinculado' => !empty($documento->idDocumentoVinculado) ? $documento->idDocumentoVinculado : null,
+            'tipo_documento' => isset($documento->tipoDocumento) ? $documento->tipoDocumento : null,
+            'data_hora' => isset($documento->dataHora) ? Carbon::parse($documento->dataHora)->format('Y-m-d H:i:s') : null,
+            'mimetype' => isset($documento->mimetype) ? $documento->mimetype : null,
+            'movimento' => !empty($documento->movimento) ? $documento->movimento : null,
+            'hash' => isset($documento->hash) ? $documento->hash : null,
+            'nivel_sigilo' => !empty($documento->nivelSigilo) ? $documento->nivelSigilo : null,
+            'descricao' => isset($documento->descricao) ? $documento->descricao : null,
+            'usuario_juntada_arquivo' => $this->extrairOutroParametro($documento, 'pessoaJuntadaArquivo'),
+            'data_juntada' => $this->extrairDataJuntada($documento),
+        ];
+
+        // RF-14 (decisão Q-01): o `''` da lista é "o tribunal não informou",
+        // e não "o documento não tem tipo". Ele cria o documento novo com
+        // `''`, como sempre, mas nunca troca o mimetype de um documento que
+        // já existe: assim não apaga o mimetype revelado pelo download do OCR
+        // (RF-09), seja qual for a ordem entre esta gravação e a revelação.
+        // Um mimetype não vazio da lista continua sobrescrevendo, como hoje,
+        // e o resto da gravação não muda. Este é o ponto único de gravação da
+        // lista: consulta síncrona, BaixarProcessoMNIJob, lista do pedido de
+        // OCR e /processo/documentos/listar.
+        if ($valores['mimetype'] === FormatosOcr::MIMETYPE_NAO_INFORMADO) {
+            $processoDocumento = ProcessoDocumento::firstOrCreate($chave, $valores);
+
+            if (! $processoDocumento->wasRecentlyCreated) {
+                $processoDocumento->fill(Arr::except($valores, ['mimetype']))->save();
+            }
+
+            return $processoDocumento;
+        }
+
+        return ProcessoDocumento::updateOrCreate($chave, $valores);
     }
 
     private function extrairOutroParametro($documento, $nome)

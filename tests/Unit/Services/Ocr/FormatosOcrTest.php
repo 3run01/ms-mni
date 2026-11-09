@@ -71,3 +71,102 @@ it('extensaoDoFilename recusa mimetype que o OCR não lê', function (string $mi
     FormatosOcr::extensaoDoFilename($mimetype);
 })->with(['video/mp4', 'audio/mpeg', 'image/svg+xml', ''])
     ->throws(InvalidArgumentException::class);
+
+/*
+ * Conjunto do total e situação calculada (DP-01; RF-03, RF-05, RNF-03).
+ */
+
+it('as constantes do mimetype não informado e da situação ignorado têm os valores de RF-03', function () {
+    expect(FormatosOcr::MIMETYPE_NAO_INFORMADO)->toBe('')
+        ->and(FormatosOcr::SITUACAO_IGNORADO)->toBe('ignorado');
+});
+
+it('situacaoNaLista dá o resultado da tabela de RF-03', function (string $mimetype, ?string $situacao, string $esperada) {
+    expect(FormatosOcr::situacaoNaLista($mimetype, $situacao))->toBe($esperada);
+})->with([
+    'video/mp4 / null → ignorado' => ['video/mp4', null, 'ignorado'],
+    'application/pdf / null → pendente' => ['application/pdf', null, 'pendente'],
+    "'' / null → pendente" => ['', null, 'pendente'],
+    'application/pdf / processado → processado' => ['application/pdf', 'processado', 'processado'],
+    'text/html / enviado → enviado' => ['text/html', 'enviado', 'enviado'],
+    'image/png / erro → erro' => ['image/png', 'erro', 'erro'],
+    "'' / erro → erro" => ['', 'erro', 'erro'],
+    'audio/mpeg / null → ignorado' => ['audio/mpeg', null, 'ignorado'],
+    'application/zip / pendente → ignorado' => ['application/zip', 'pendente', 'ignorado'],
+    'video/mp4 / processado → ignorado' => ['video/mp4', 'processado', 'ignorado'],
+]);
+
+it('situacaoNaLista sempre dá 1 dos 5 valores, nunca null, e o vazio nunca sai ignorado', function () {
+    $validos = ['pendente', 'enviado', 'processado', 'erro', 'ignorado'];
+    $mimetypes = [...FormatosOcr::MIMETYPES_LEGIVEIS, '', 'video/mp4', 'audio/mpeg', 'application/zip', null];
+    $situacoes = [null, 'pendente', 'enviado', 'processado', 'erro', 'desconhecida', ''];
+
+    foreach ($mimetypes as $mimetype) {
+        foreach ($situacoes as $situacao) {
+            $resultado = FormatosOcr::situacaoNaLista($mimetype, $situacao);
+
+            expect($resultado)->not->toBeNull()->toBeIn($validos);
+
+            if ($mimetype === '') {
+                expect($resultado)->not->toBe(FormatosOcr::SITUACAO_IGNORADO);
+            }
+        }
+    }
+
+    expect(FormatosOcr::situacaoNaLista('', null))->toBe('pendente')
+        ->and(FormatosOcr::situacaoNaLista('', 'erro'))->toBe('erro');
+});
+
+it('situacaoNaLista leva situação desconhecida de mimetype do total a pendente, como a contagem', function (?string $situacao) {
+    expect(FormatosOcr::situacaoNaLista('application/pdf', $situacao))->toBe('pendente')
+        ->and(FormatosOcr::situacaoNaLista('', $situacao))->toBe('pendente');
+})->with([
+    'nulo' => [null],
+    'pendente' => ['pendente'],
+    'valor fora das 4 situações' => ['desconhecida'],
+    'vazio' => [''],
+]);
+
+it('entraNoTotal vale só para os 8 legíveis e o vazio, e ehIgnorado é a negação', function (string $mimetype, bool $noTotal) {
+    expect(FormatosOcr::entraNoTotal($mimetype))->toBe($noTotal)
+        ->and(FormatosOcr::ehIgnorado($mimetype))->toBe(! $noTotal);
+})->with([
+    'application/pdf' => ['application/pdf', true],
+    'text/html' => ['text/html', true],
+    'image/png' => ['image/png', true],
+    'image/jpeg' => ['image/jpeg', true],
+    'image/webp' => ['image/webp', true],
+    'image/tiff' => ['image/tiff', true],
+    'image/bmp' => ['image/bmp', true],
+    'image/gif' => ['image/gif', true],
+    'vazio' => ['', true],
+    'video/mp4' => ['video/mp4', false],
+    'audio/mpeg' => ['audio/mpeg', false],
+    'application/zip' => ['application/zip', false],
+]);
+
+it('o nulo fica fora do total e conta como ignorado, como o ELSE da contagem', function () {
+    expect(FormatosOcr::entraNoTotal(null))->toBeFalse()
+        ->and(FormatosOcr::ehIgnorado(null))->toBeTrue()
+        ->and(FormatosOcr::situacaoNaLista(null, null))->toBe('ignorado');
+});
+
+it('o vazio entra no total, mas continua não legível e sem extensão de envio', function () {
+    expect(FormatosOcr::entraNoTotal(''))->toBeTrue()
+        ->and(FormatosOcr::ehLegivel(''))->toBeFalse()
+        ->and(fn () => FormatosOcr::extensaoDoFilename(''))->toThrow(InvalidArgumentException::class);
+});
+
+it('a lista legível é declarada num só arquivo de app/ (RNF-03)', function () {
+    $arquivos = [];
+
+    $iterador = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(app_path(), FilesystemIterator::SKIP_DOTS));
+
+    foreach ($iterador as $arquivo) {
+        if ($arquivo->isFile() && str_contains((string) file_get_contents($arquivo->getPathname()), "'image/webp'")) {
+            $arquivos[] = str_replace(base_path().DIRECTORY_SEPARATOR, '', $arquivo->getPathname());
+        }
+    }
+
+    expect($arquivos)->toBe(['app/Services/Ocr/FormatosOcr.php']);
+});

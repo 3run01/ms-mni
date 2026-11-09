@@ -62,6 +62,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Atualização do processo em segundo plano (DEP-08)
+    |--------------------------------------------------------------------------
+    |
+    | `janela_segundos`: enquanto a janela de um (tribunal_id, numero_processo)
+    | está aberta, GET /processo/visualizar com o processo no banco não
+    | enfileira de novo o BaixarProcessoMNIJob, seja qual for o par da
+    | chamada. Vale só para /processo/visualizar: /processo/consultar e o
+    | despacho a partir do expediente continuam com 1 job por chamada.
+    | A janela fica no store de cache padrão, e o `cache:clear` de cada deploy
+    | (build.sh) apaga as abertas: a 1ª chamada depois do deploy enfileira um
+    | job (LIM-04). Sem variável de ambiente, como os outros limites fixos.
+    |
+    */
+
+    'atualizacao_processo' => [
+        'janela_segundos' => 600,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Callbacks de saída
     |--------------------------------------------------------------------------
     |

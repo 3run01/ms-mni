@@ -40,6 +40,7 @@ const MENSAGEM_401_WEBHOOK_OCR = 'Credencial do webhook inválida';
 const MENSAGEM_404_WEBHOOK_OCR = 'Job não encontrado';
 
 beforeEach(function () {
+    isolarAvisosOcrDoBancoDeDev();
     Queue::fake();
     $this->freezeSecond();
 

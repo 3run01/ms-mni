@@ -45,6 +45,7 @@ const TOKEN_WORKFLOW_DOWNLOAD_OCR = 'token-workflow-download-6c9';
 const TEXTO_RECUSA_DOWNLOAD_OCR = 'Erro ao realizar login via MNI. exception invoking: loginFailed';
 
 beforeEach(function () {
+    isolarAvisosOcrDoBancoDeDev();
     $this->freezeSecond();
     Storage::fake('s3');
     criarTokenApi();

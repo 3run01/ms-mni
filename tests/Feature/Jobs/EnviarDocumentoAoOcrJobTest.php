@@ -43,6 +43,7 @@ const LOGIN_ENVIO_OCR_JOB = 'login-envio-3c7';
 const SENHA_ENVIO_OCR_JOB = 'senha-envio-8d4';
 
 beforeEach(function () {
+    isolarAvisosOcrDoBancoDeDev();
     $this->freezeSecond();
     Storage::fake('s3');
 

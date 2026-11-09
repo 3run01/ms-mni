@@ -26,3 +26,13 @@ it('documenta as variaveis do download em lote no .env.example', function () {
     expect($exemplo)->toContain('PJE_DOWNLOAD_TAMANHO_LOTE')
         ->and($exemplo)->toContain('PJE_DOWNLOAD_MAX_PAGINAS');
 });
+
+it('expoe a janela de atualizacao do processo em 600 segundos, sem variavel de ambiente', function () {
+    expect(config('pje.atualizacao_processo'))->toBeArray()
+        ->toHaveKey('janela_segundos')
+        ->and(config('pje.atualizacao_processo.janela_segundos'))->toBe(600);
+
+    $arquivo = file_get_contents(config_path('pje.php'));
+
+    expect($arquivo)->toContain("'janela_segundos' => 600,");
+});
