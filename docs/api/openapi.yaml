@@ -44,6 +44,29 @@ info:
       que abre processamento devolve à fila os documentos com erro do
       processamento anterior, e o `com_erro` do `202` da reabertura cai
       (ex.: de 5 para 0).
+
+    ## Mudanças acordadas (DEP-07)
+    Cópia acordada com o Sistema Jurídico (feature visualizador-de-processo),
+    marcada com `x-dependencia: DEP-07`:
+    - `GET /processo/visualizar` traz, em cada documento, os campos novos
+      `tipo` (resolvido sem uma consulta por documento), `data_juntada`,
+      `usuario_juntada_arquivo`, `mimetype`, `file_size` e a `ocr_situacao`
+      calculada no ms-mni: `ignorado` só com `mimetype` não vazio fora dos
+      formatos que o OCR lê; senão, a situação gravada, e a nula sai
+      `pendente`.
+    - `GET /documento/visualizar` traz `documento.conteudo_html` (texto ou
+      null; preenchido em `text/html`), e o `link` de um documento HTML
+      aponta para o PDF renderizado.
+    - Os itens de `prioridades` (`Prioridade`) e de
+      `partes[].representantes_processual` (`RepresentanteProcessual`)
+      passam a ser descritos.
+    - `total` e `ignorados` (`ProcessamentoDeOcr` e `AvisoDeProgressoDoOcr`)
+      contam o documento sem `mimetype` como pendente, dentro de `total`. Ele
+      sai de `total` e entra em `ignorados` quando o download revela um
+      formato que o OCR não lê, então `total` pode diminuir entre avisos.
+    Até o deploy no ms-mni a integração real não as tem; ao receber o yaml
+    oficial, substitua as duas cópias e rode
+    `tests/Feature/Servicos/MniTest.php`.
 servers:
   - url: https://{host}/api
     description: Servidor da aplicação
@@ -137,6 +160,11 @@ paths:
         Retorna um processo com relações completas (tribunal, partes e
         representantes, prioridades, classe, assuntos, movimentos, documentos).
         Baixa do MNI se ausente; senão dispara atualização em background.
+
+        DEP-07: cada documento traz `tipo`, `data_juntada`,
+        `usuario_juntada_arquivo`, `mimetype`, `file_size` e `ocr_situacao`
+        (calculada; ver `Documento`). O `tipo` é resolvido pelos tipos do
+        tribunal carregados uma vez, sem uma consulta por documento.
       parameters:
         - { $ref: '#/components/parameters/LoginPje' }
         - { $ref: '#/components/parameters/SenhaPje' }
@@ -319,6 +347,10 @@ paths:
       description: |
         Baixa o documento (até 3 tentativas) e retorna um link temporário do
         S3, válido por 60 minutos, em `documento.link`.
+
+        DEP-07: num documento `text/html`, `documento.conteudo_html` traz o
+        HTML, e `documento.link` aponta para o PDF renderizado. Nos demais
+        tipos, `conteudo_html` é null.
       parameters:
         - { $ref: '#/components/parameters/LoginPje' }
         - { $ref: '#/components/parameters/SenhaPje' }
@@ -1012,10 +1044,10 @@ components:
       properties:
         numero_processo: { type: string, pattern: '^[0-9]{20}$' }
         tribunal_id: { type: integer, minimum: 1 }
-        total: { type: integer, minimum: 0, description: "Documentos em formato que o OCR lê." }
+        total: { type: integer, minimum: 0, description: "Documentos em formato que o OCR lê e documentos ainda sem mimetype, pendentes até o download (DEP-07)." }
         processados: { type: integer, minimum: 0, description: "Documentos já lidos pelo OCR, em qualquer processamento." }
         com_erro: { type: integer, minimum: 0, description: "Documentos com erro definitivo no download ou no OCR neste processamento (D-08)." }
-        ignorados: { type: integer, minimum: 0, description: "Documentos em formato que o OCR não lê; ficam fora de `total`." }
+        ignorados: { type: integer, minimum: 0, description: "Documentos com mimetype conhecido fora dos formatos que o OCR lê; ficam fora de `total`. Um documento sem mimetype sai de `total` e entra aqui quando o download revela um formato que o OCR não lê (DEP-07)." }
         situacao:
           type: string
           enum: [em_andamento, concluido]
@@ -1028,10 +1060,10 @@ components:
       properties:
         numero_processo: { type: string, pattern: '^[0-9]{20}$' }
         tribunal_id: { type: integer, minimum: 1 }
-        total: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0, description: "Documentos em formato que o OCR lê e documentos ainda sem mimetype, pendentes até o download (DEP-07). `total` pode diminuir entre avisos." }
         processados: { type: integer, minimum: 0 }
         com_erro: { type: integer, minimum: 0 }
-        ignorados: { type: integer, minimum: 0 }
+        ignorados: { type: integer, minimum: 0, description: "Documentos com mimetype conhecido fora dos formatos que o OCR lê; ficam fora de `total`. Um documento sem mimetype sai de `total` e entra aqui quando o download revela um formato que o OCR não lê, então `total` pode diminuir entre avisos (DEP-07)." }
         situacao: { type: string, enum: [em_andamento, concluido, falhou] }
         codigo:
           type: string
@@ -1277,7 +1309,43 @@ components:
             - type: "null"
         representantes_processual:
           type: array
-          items: { type: object }
+          items: { $ref: '#/components/schemas/RepresentanteProcessual' }
+    RepresentanteProcessual:
+      type: object
+      x-dependencia: DEP-07
+      description: Representante processual de uma parte (`partes[].representantes_processual`).
+      properties:
+        nome:
+          oneOf:
+            - type: string
+              example: "JOSÉ RENATO SOARES"
+            - type: "null"
+        inscricao:
+          oneOf:
+            - type: string
+              example: "AP2848"
+              description: "Inscrição como veio do tribunal (ex.: UF da OAB seguida do número)."
+            - type: "null"
+        tipo_representante:
+          oneOf:
+            - type: string
+              example: "A"
+              description: "Código do tipo: `A` Advogado, `E` Escritório de Advocacia, `M` Ministério Público, `D` Defensoria Pública, `P` Outros órgãos."
+            - type: "null"
+        numero_documento_principal:
+          oneOf:
+            - type: string
+            - type: "null"
+    Prioridade:
+      type: object
+      x-dependencia: DEP-07
+      description: Prioridade de tramitação do processo (`prioridades`).
+      properties:
+        descricao:
+          oneOf:
+            - type: string
+              example: "Idoso(a)"
+            - type: "null"
     Movimento:
       type: object
       properties:
@@ -1317,7 +1385,7 @@ components:
         tipo:
           oneOf:
             - type: string
-              description: "Descrição do tipo, resolvida em /processo/documentos/listar."
+              description: "Descrição do tipo, resolvida em /processo/documentos/listar. Vem também em /processo/visualizar, resolvida sem uma consulta por documento (DEP-07)."
             - type: "null"
         descricao:
           oneOf:
@@ -1336,14 +1404,17 @@ components:
           oneOf:
             - type: string
               format: date-time
+              description: "Data da juntada aos autos. Vem também em /processo/visualizar (DEP-07)."
             - type: "null"
         usuario_juntada_arquivo:
           oneOf:
             - type: string
+              description: "Quem juntou o documento. Vem também em /processo/visualizar (DEP-07)."
             - type: "null"
         mimetype:
           oneOf:
             - type: string
+              description: "Tipo do arquivo; a string vazia é o documento ainda não baixado. Vem também em /processo/visualizar (DEP-07)."
             - type: "null"
         hash:
           oneOf:
@@ -1361,12 +1432,34 @@ components:
         file_size:
           oneOf:
             - type: integer
+              description: "Tamanho do arquivo em bytes. Vem também em /processo/visualizar (DEP-07)."
             - type: "null"
         link:
           oneOf:
             - type: string
               format: uri
-              description: "URL temporária S3 (validade 60 min), presente apenas em /documento/visualizar."
+              description: "URL temporária S3 (validade 60 min), presente apenas em /documento/visualizar. Num documento `text/html`, aponta para o PDF renderizado (DEP-07)."
+            - type: "null"
+        ocr_situacao:
+          x-dependencia: DEP-07
+          description: |
+            Situação do documento no OCR, presente apenas em
+            /processo/visualizar e calculada no ms-mni: `ignorado` só quando o
+            `mimetype` não é vazio e está fora dos formatos que o OCR lê; nos
+            demais casos, a situação gravada, e a nula sai `pendente`. O
+            documento ainda não baixado (`mimetype` vazio) sai `pendente`,
+            nunca `ignorado`.
+          oneOf:
+            - type: string
+              enum: [pendente, enviado, processado, erro, ignorado]
+            - type: "null"
+        conteudo_html:
+          x-dependencia: DEP-07
+          description: |
+            HTML do documento, presente apenas em /documento/visualizar e
+            preenchido só em `text/html`; nos demais tipos, null.
+          oneOf:
+            - type: string
             - type: "null"
     Processo:
       type: object
@@ -1429,7 +1522,7 @@ components:
             - type: object
             - type: "null"
         assuntos: { type: array, items: { type: object } }
-        prioridades: { type: array, items: { type: object } }
+        prioridades: { type: array, items: { $ref: '#/components/schemas/Prioridade' } }
         partes:
           type: array
           items: { $ref: '#/components/schemas/ProcessoParte' }
