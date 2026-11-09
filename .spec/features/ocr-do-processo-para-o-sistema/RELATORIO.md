@@ -291,6 +291,19 @@ Vão junto com o `docs/api/openapi.yaml` oficial (item M-5 da seção 5).
 | OQ-S5 | Como o Sistema apresenta o `falhou` sem `codigo` de RF-13? O usuário pode precisar de mais de um "sim" para o mesmo documento | LIM-02, LIM-03 | Mensagem de "tente de novo". Um novo "sim" continua de onde parou (RF-07) |
 | OQ-S6 | O Sistema troca as duas cópias do contrato pelo `docs/api/openapi.yaml` oficial e roda `~/Projetos/sistema-juridico-lorran/tests/Feature/Servicos/MniTest.php`? | Distribution by Repo | Sim, depois do merge |
 
+### Respostas do Sistema (2026-11-07)
+
+Registradas também em `.spec/features/consulta-de-processo-pelo-chat/.handoff/ms-mni-dep-03-a-05.md` do Sistema.
+
+| ID | Resposta |
+|---|---|
+| OQ-S1 | Aceito o texto "só em jobs cifrados", com a task M-10: os jobs falhos que levam o par saem de `failed_jobs` e do Horizon em até 1 h. O texto do contrato passa a "só em jobs cifrados; um job falho que leva o par é apagado em até 1 h" |
+| OQ-S2 | Sim. Cada pedido do Sistema grava por cima as contagens do 202 e troca o `callback_token`; a regra de contagem que não diminui só vale dentro do mesmo processamento. Aviso atrasado do processamento anterior recebe 403 (token antigo). D-08 aceito; trocar o texto de `com_erro` para "erro definitivo neste processamento" |
+| OQ-S3 | Já tratado no Sistema: o aviso com contagem menor responde 200 e não muda nada |
+| OQ-S4 | Já tratado no Sistema: conversa excluída → 404 |
+| OQ-S5 | Aceito: o Sistema mostra "Não foi possível processar os documentos do processo. Peça ao Estagiário para tentar de novo.", e um novo "sim" continua de onde parou |
+| OQ-S6 | Feito no Sistema (branch `fix-integracao-ia`): as duas cópias são o `docs/api/openapi.yaml` de `3b756f8`, e o `MniTest` passa. A `sigla` fora de `required` em `Tribunal` é aceita: o Sistema já trata linha sem sigla |
+
 ## 4. Roteiro de homologação
 
 Cobre RF-01 AC (d), RNF-02 e RNF-03. Nenhum passo foi executado ainda: todos estão pendentes (seção 5). Registrar cada valor medido na tabela de resultados (4.4).
@@ -409,8 +422,11 @@ Leitura do resultado (Q-06):
 | M-2 | Homologação H-1 a H-7 e a tabela 4.4 (RF-01 AC d, RNF-02, RNF-03) | Desenvolvedor | Pendente |
 | M-3 | A chave do Gemini no nó "Config" do workflow, decisão do desenvolvedor antes do primeiro OCR real (Scope → Out) | Desenvolvedor | Pendente |
 | M-4 | Rollout: `N8N_OCR_*` em produção e homologação, e `CALLBACK_HOSTS_LIBERADOS` só em desenvolvimento. `migrate --force` fora do pico: o `ALTER TABLE processo_documentos` cria 2 índices. Depois, `php artisan horizon:terminate` e `schedule:list` | Operação | Pendente |
-| M-5 | Mandar ao Sistema o `docs/api/openapi.yaml` oficial, com D-01 a D-08 e as Open Questions OQ-S1 a OQ-S6 | Desenvolvedor | Pendente |
+| M-5 | Mandar ao Sistema o `docs/api/openapi.yaml` oficial, com D-01 a D-08 e as Open Questions OQ-S1 a OQ-S6 | Desenvolvedor | Feito em 2026-11-07: respostas na seção 3 |
 | M-6 | Rodar `/ai-context` depois do merge e conferir que filas, rotas, tabelas e regras do OCR continuam em `AGENTS.md` e `docs/agents/`. O comentário no topo do `AGENTS.md` pede isso | Desenvolvedor | Pendente |
 | M-7 | Não há gate de CI: rodar `composer test` e `npm run typecheck` antes do push (`AGENTS.md` §1) | Desenvolvedor | Feito nesta verificação para o commit `4bfe484`. Repetir se houver commit novo |
 | M-8 | Retenção de `processo_ocr_avisos` e `processo_ocr_processamentos` (PQ-06), por exemplo com um comando no padrão de `monitoramentos:limpar-execucoes`. Fora do escopo da SPEC | Backlog | Em aberto |
 | M-9 | Registrar aqui os casos de LIM-03 (job preso até M) vistos em homologação ou produção, conforme a tabela de Risks do PLAN | Operação | Pendente |
+| M-10 | OQ-S1: apagar de `failed_jobs` e do Horizon, em até 1 h, os jobs falhos que levam o par (`BaixarDocumentoParaOcrJob`; os 6 jobs antigos com `ShouldBeEncrypted` podem entrar no mesmo comando). Por exemplo, um comando agendado que filtra pelo `displayName` do payload, que fica em texto aberto, e atualiza o D-04 e a descrição de `login_pje`/`senha_pje` no `docs/api/openapi.yaml`. Avisar o Sistema da mudança de texto (o `MniTest` de lá confere a descrição do par) | Desenvolvedor | Pendente |
+| M-11 | Ambiente local (2026-11-07): `.env` com `N8N_OCR_*` e `CALLBACK_HOSTS_LIBERADOS=host.docker.internal`, `config:clear` e `horizon:terminate` aplicados; os supervisores `ocr-download`, `ocr-envio` e `ocr-aviso` rodando com 1/2/1 (`APP_ENV=development`). Rede conferida: ms-mni → Sistema 8090, ms-mni → n8n e n8n → ms-mni | Desenvolvedor | Feito |
+| M-12 | Primeiro teste real (2026-11-07, processamento 6504, 293 documentos, TJAP 2º grau): (a) o Sistema respondeu 429 ao 121º aviso (limite de 120/min, 120 avisos em 34 s) e o ms-mni encerrou o assinante; corrigido no Sistema (limite 600/min e 503 com `Retry-After` acima dele). Sugestão para o ms-mni: tratar 429 (e 408) como 5xx em RF-16, respeitando o `Retry-After`. (b) O n8n reiniciou às 10:21:52 com cerca de 91 execuções de OCR simultâneas: o workflow processa cada documento na hora em que recebe, e os workers de `ocr-envio` não limitam nada, porque cada envio termina no 202. Os 91 jobs ficaram `running` para sempre no n8n e no ms-mni como `enviado`. É a pré-condição P-2: a concorrência precisa de um limite antes da homologação. Resolvido no workflow (repo do Sistema, `docker/n8n/juridico-ocr.json`, importado em 2026-11-07 10:43): o pedido só cria o job `pending` e responde 202; "Reservar jobs" leva no máximo 20 a `running` ao mesmo tempo; a cada minuto, um job `running` sem progresso há 15 min volta uma vez para a fila e, na segunda, falha com aviso. Os 91 jobs órfãos falharam com aviso ao ms-mni, e o 6504 fechou `concluido` (206 processados, 87 com erro). Fica para o ms-mni só a sugestão do 429 | Desenvolvedor | (a) e (b) resolvidos no Sistema |
