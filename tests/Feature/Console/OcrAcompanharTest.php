@@ -44,6 +44,10 @@ const SENHA_ACOMPANHAR_OCR = 'senha-acompanhar-6d2';
 const POST_ACOMPANHAR_OCR = 'POST /documents/process';
 
 beforeEach(function () {
+    // O banco de dev pode ter processamentos reais em andamento (homologação):
+    // a rodada só pode ver os deste teste.
+    isolarProcessamentosOcrDoBancoDeDev();
+
     Queue::fake([EnviarAvisoOcrJob::class]);
     $this->freezeSecond();
     $this->minutoZero = now()->toImmutable();

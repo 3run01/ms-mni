@@ -173,3 +173,23 @@ function isolarAvisosOcrDoBancoDeDev(): void
 
     \App\Models\ProcessoOcrAviso::query()->delete();
 }
+
+/**
+ * Esvazia `processo_ocr_processamentos` dentro da transação do teste; o
+ * cascade leva junto os assinantes e os avisos.
+ *
+ * Mesmo motivo de isolarAvisosOcrDoBancoDeDev(): a homologação do OCR deixa
+ * no banco de dev processamentos reais `em_andamento`, com documentos
+ * `enviado`. O `ocr:acompanhar` percorre todo processamento em andamento e
+ * consultaria os jobs deles no workflow simulado, o que muda as chamadas e
+ * os avisos que os fluxos conferem. O rollback desfaz o delete; fora de uma
+ * transação ele apagaria dados de verdade, então recusa.
+ */
+function isolarProcessamentosOcrDoBancoDeDev(): void
+{
+    if (\Illuminate\Support\Facades\DB::transactionLevel() === 0) {
+        throw new LogicException('isolarProcessamentosOcrDoBancoDeDev() só roda dentro de DatabaseTransactions.');
+    }
+
+    \App\Models\ProcessoOcrProcessamento::query()->delete();
+}

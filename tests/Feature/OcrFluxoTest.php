@@ -1,6 +1,9 @@
 <?php
 
+use App\Jobs\BaixarDocumentoMNIJob;
 use App\Jobs\BaixarDocumentoParaOcrJob;
+use App\Jobs\BaixarDocumentosMNIEmLoteJob;
+use App\Jobs\BaixarProcessoMNIJob;
 use App\Jobs\EnviarAvisoOcrJob;
 use App\Jobs\EnviarDocumentoAoOcrJob;
 use App\Jobs\VerificarReenvioOcrJob;
@@ -120,6 +123,10 @@ final class FilaSyncFluxoOcr extends SyncQueue
 }
 
 beforeEach(function () {
+    // O banco de dev pode ter processamentos reais em andamento (homologação):
+    // o `ocr:acompanhar` das rodadas só pode ver os deste teste.
+    isolarProcessamentosOcrDoBancoDeDev();
+
     $this->freezeSecond();
     $this->minutoZero = now()->toImmutable();
     Storage::fake('s3');
@@ -171,15 +178,24 @@ beforeEach(function () {
 
 /**
  * MNI simulado. A consulta do processo devolve `->documentos`
- * (`[id_documento => mimetype]`); a consulta de um documento devolve o
- * binário, salvo os ids em `->falhar` (falha sem `loginfailed`) e os
- * downloads com um login de `->recusarAPartirDe` (`[login => n]`): o
+ * (`[id_documento => mimetype]`), com a descrição de `->descricoes`
+ * (`[id_documento => descricao]`) quando houver; a consulta de um documento
+ * devolve o binário, salvo os ids em `->falhar` (falha sem `loginfailed`) e
+ * os downloads com um login de `->recusarAPartirDe` (`[login => n]`): o
  * tribunal recusa esse par a partir do n-ésimo download feito com ele.
+ *
+ * O download informa o mimetype de `->revelar` (`[id_documento =>
+ * mimetype]`) quando o id está lá, e o da lista quando não está: é assim que
+ * o tribunal revela o mimetype de um documento que a lista mandou `''`
+ * (RF-09). O `polo` vazio deixa o BaixarProcessoMNIJob gravar a lista
+ * inteira, como na atualização em segundo plano (DEP-08).
  */
 function mniFluxoOcr(): stdClass
 {
     $mni = new stdClass;
     $mni->documentos = [];
+    $mni->descricoes = [];
+    $mni->revelar = [];
     $mni->falhar = [];
     $mni->recusarAPartirDe = [];
     $mni->downloadsPorLogin = [];
@@ -195,10 +211,14 @@ function mniFluxoOcr(): stdClass
                         'classeProcessual' => '7',
                         'nivelSigilo' => 0,
                         'valorCausa' => 1500,
+                        'polo' => [],
                     ],
                     'movimento' => [],
                     'documento' => collect($mni->documentos)
-                        ->map(fn (string $mimetype, int $id) => documentoMniFake($id, ['mimetype' => $mimetype]))
+                        ->map(fn (string $mimetype, int $id) => documentoMniFake($id, array_filter([
+                            'mimetype' => $mimetype,
+                            'descricao' => $mni->descricoes[$id] ?? null,
+                        ], fn ($valor) => $valor !== null)))
                         ->values()
                         ->all(),
                 ],
@@ -217,9 +237,16 @@ function mniFluxoOcr(): stdClass
             return (object) ['sucesso' => false, 'mensagem' => 'Documento indisponível no momento'];
         }
 
+        $mimetype = array_key_exists($id, $mni->revelar) ? $mni->revelar[$id] : $mni->documentos[$id];
+        $atributos = ['mimetype' => $mimetype];
+
+        if ($mimetype === 'text/html') {
+            $atributos['conteudo'] = "<html><body><p>Documento {$id} revelado</p></body></html>";
+        }
+
         return (object) [
             'sucesso' => true,
-            'processo' => (object) ['documento' => documentoMniFake($id, ['mimetype' => $mni->documentos[$id]])],
+            'processo' => (object) ['documento' => documentoMniFake($id, $atributos)],
         ];
     });
 
@@ -757,6 +784,123 @@ function recusaNoQuartoDownloadFluxoOcr(): array
     ];
 }
 
+// ---------- mimetype vazio (DEP-07 (c)) ----------
+
+/**
+ * `GET /processo/visualizar` com o token e o par do solicitante. Com o
+ * processo no banco e a janela fechada, a chamada despacha o
+ * BaixarProcessoMNIJob, que roda na hora (fila `sync`) depois de a lista da
+ * resposta ser lida.
+ */
+function visualizarFluxoOcr(array $solicitante): TestResponse
+{
+    return test()->withHeaders(['X-API-Token' => $solicitante['token']])
+        ->getJson('/api/processo/visualizar?'.http_build_query([
+            'tribunal_id' => test()->tribunal->id,
+            'numero_processo' => NUMERO_FLUXO_OCR,
+            'login_pje' => $solicitante['login_pje'],
+            'senha_pje' => $solicitante['senha_pje'],
+        ]));
+}
+
+/**
+ * O item do documento na lista de `/processo/visualizar`.
+ *
+ * @return array<string, mixed>
+ */
+function documentoNaListaFluxoOcr(TestResponse $resposta, int $idDocumento): array
+{
+    $resposta->assertOk();
+
+    $itens = array_values(array_filter(
+        $resposta->json('documentos'),
+        fn (array $item) => (int) $item['id_documento'] === $idDocumento,
+    ));
+
+    expect($itens)->toHaveCount(1);
+
+    return $itens[0];
+}
+
+/**
+ * Os corpos de `POST documents/process`, na ordem.
+ *
+ * @return list<array<string, mixed>>
+ */
+function corposDosEnviosFluxoOcr(): array
+{
+    return Http::recorded(fn (Request $request) => $request->method() === 'POST'
+            && $request->url() === BASE_WORKFLOW_FLUXO_OCR.'/documents/process')
+        ->map(fn (array $par) => $par[0]->data())
+        ->values()
+        ->all();
+}
+
+/**
+ * Os avisos entregues ao solicitante cuja situação é `em_andamento`.
+ *
+ * @return list<array<string, mixed>>
+ */
+function avisosEmAndamentoFluxoOcr(array $solicitante): array
+{
+    return array_values(array_filter(
+        avisosEntreguesFluxoOcr($solicitante),
+        fn (array $aviso) => $aviso['situacao'] === 'em_andamento',
+    ));
+}
+
+/**
+ * Fluxo (c) do T13 (RF-11): um PDF já processado num 1º processamento, e
+ * depois um documento que a lista manda `''` e o download revela
+ * "video/mp4", único pendente do 2º processamento, com o dono e 1 carona.
+ * O download espera na fila até o carona entrar.
+ *
+ * @return array{pdf: int, video: int, primeiro: array, dono: array, carona: array, revelacao: array}
+ */
+function videoReveladoFluxoOcr(): array
+{
+    [$pdf] = documentosNoMniFluxoOcr(1);
+    $primeiro = solicitanteFluxoOcr('primeiro');
+
+    expect202FluxoOcr(pedirOcrFluxo($primeiro), ['total' => 1, 'processados' => 0, 'com_erro' => 0, 'ignorados' => 0, 'situacao' => 'em_andamento']);
+    retornarTodosFluxoOcr([$pdf]);
+    expect(resumoDosAvisosFluxoOcr($primeiro))->toBe(['em_andamento 1/0', 'concluido 1/0']);
+
+    // O tribunal passa a listar um documento sem mimetype, que é um vídeo.
+    $video = PRIMEIRO_DOCUMENTO_FLUXO_OCR + 60;
+    test()->processoMni->documentos[$video] = '';
+    test()->processoMni->revelar[$video] = 'video/mp4';
+
+    $dono = solicitanteFluxoOcr('dono');
+    $carona = solicitanteFluxoOcr('carona');
+    test()->fila->reter = [BaixarDocumentoParaOcrJob::class];
+
+    // Antes: total T = 2 (o PDF processado e o vazio) e ignorados I = 0.
+    $abertura = ['total' => 2, 'processados' => 1, 'com_erro' => 0, 'ignorados' => 0, 'situacao' => 'em_andamento'];
+    $pedidos = duranteFluxoOcr(function () use ($dono, $carona, $abertura) {
+        expect202FluxoOcr(pedirOcrFluxo($dono), $abertura);
+        expect202FluxoOcr(pedirOcrFluxo($carona), $abertura);
+    });
+
+    // Só a listagem saiu, e o vazio espera na fila de download.
+    expect($pedidos['soap'])->toHaveCount(1)
+        ->and(downloadsFluxoOcr($pedidos['soap']))->toBe([])
+        ->and(documentosDosJobsFluxoOcr(array_column(test()->fila->retidos, 0), BaixarDocumentoParaOcrJob::class))->toBe([$video])
+        ->and(test()->fila->retidos[0][0]->queue)->toBe(BaixarDocumentoParaOcrJob::FILA);
+
+    $revelacao = duranteFluxoOcr(fn () => test()->fila->soltar());
+    test()->fila->reter = [];
+
+    return [
+        'pdf' => $pdf,
+        'video' => $video,
+        'primeiro' => $primeiro,
+        'dono' => $dono,
+        'carona' => $carona,
+        'revelacao' => $revelacao,
+    ];
+}
+
 // ---------- o helper do schema ----------
 
 it('o helper do schema recusa chave fora do contrato, chave ausente, situacao fora do enum e codigo sem falhou', function () {
@@ -1176,4 +1320,325 @@ it('503 na 1ª tentativa do 3º aviso: o final é entregue antes da nova tentati
     expectFalhasDaFilaFluxoOcr([EnviarAvisoOcrJob::class]);
     expect($this->fila->falhas[0]['erro'])->toBeInstanceOf(RequestException::class);
     conferirAvisosFluxoOcr();
+});
+
+// ---------- mimetype vazio: revelação pelo download (T13; DEP-07 (c)) ----------
+
+it('(a) vazio revelado PDF: 1 SOAP de download com o par do dono, 1 envio com filename .pdf, 0 avisos da revelação, e o success gera o aviso e o final (RF-08, RF-09, RF-10)', function () {
+    $vazio = PRIMEIRO_DOCUMENTO_FLUXO_OCR + 10;
+    $this->processoMni->documentos = [$vazio => ''];
+    $this->processoMni->revelar = [$vazio => 'application/pdf'];
+    $dono = solicitanteFluxoOcr('dono');
+
+    // O vazio conta em `total` como pendente, e não em `ignorados` (RF-07).
+    $pedido = duranteFluxoOcr(fn () => expect202FluxoOcr(pedirOcrFluxo($dono), [
+        'total' => 1, 'processados' => 0, 'com_erro' => 0, 'ignorados' => 0, 'situacao' => 'em_andamento',
+    ]));
+
+    // A listagem e 1 download do vazio, ambos com o par do dono; 1 envio; 0 avisos.
+    expect($pedido['soap'])->toHaveCount(2)
+        ->and(downloadsFluxoOcr($pedido['soap']))->toBe([$vazio])
+        ->and(documentosDosJobsFluxoOcr($pedido['jobs'], BaixarDocumentoParaOcrJob::class))->toBe([$vazio])
+        ->and(documentosDosJobsFluxoOcr($pedido['jobs'], EnviarDocumentoAoOcrJob::class))->toBe([$vazio])
+        ->and($pedido['workflow'])->toBe([POST_FLUXO_OCR])
+        ->and($pedido['avisos'])->toBe([]);
+    expectSoapComOParFluxoOcr($pedido['soap'], $dono);
+
+    // O pedido nunca manda o vazio direto ao envio: o envio sai do download (RF-08).
+    $jobsDoPedido = array_values(array_filter($pedido['jobs'], fn (object $job) => $job instanceof BaixarDocumentoParaOcrJob || $job instanceof EnviarDocumentoAoOcrJob));
+    expect($jobsDoPedido[0])->toBeInstanceOf(BaixarDocumentoParaOcrJob::class)
+        ->and($jobsDoPedido[0]->queue)->toBe(BaixarDocumentoParaOcrJob::FILA)
+        ->and($jobsDoPedido[1]->queue)->toBe(EnviarDocumentoAoOcrJob::FILA);
+
+    [$corpo] = corposDosEnviosFluxoOcr();
+    $documento = documentoFluxoOcr($vazio);
+
+    expect($corpo['filename'])->toBe("{$vazio}.pdf")
+        ->and($corpo['metadata']['mimetype'])->toBe('application/pdf')
+        ->and($documento->mimetype)->toBe('application/pdf')
+        ->and($documento->path)->toEndWith("/{$vazio}.pdf")
+        ->and($documento->status)->toBe(ProcessoDocumento::STATUS_BAIXADO)
+        ->and($documento->ocr_situacao)->toBe(ProcessoDocumento::OCR_ENVIADO)
+        ->and(Storage::disk('s3')->exists($documento->path))->toBeTrue();
+
+    $retorno = duranteFluxoOcr(fn () => retornarTodosFluxoOcr([$vazio]));
+
+    expect($retorno['soap'])->toBe([])
+        ->and(resumoDosAvisosFluxoOcr($dono))->toBe(['em_andamento 1/0', 'concluido 1/0'])
+        ->and(last(avisosEntreguesFluxoOcr($dono)))->toMatchArray(['total' => 1, 'processados' => 1, 'com_erro' => 0, 'ignorados' => 0])
+        ->and(documentoFluxoOcr($vazio)->ocr_situacao)->toBe(ProcessoDocumento::OCR_PROCESSADO)
+        ->and(processamentosFluxoOcr()[0]->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO);
+    conferirAvisosFluxoOcr();
+    expectFalhasDaFilaFluxoOcr([]);
+});
+
+it('(b) vazio revelado HTML: o url do envio aponta para o PDF renderizado, o filename é .pdf, e o .html fica em path_html (RF-09, RF-10)', function () {
+    $vazio = PRIMEIRO_DOCUMENTO_FLUXO_OCR + 20;
+    $this->processoMni->documentos = [$vazio => ''];
+    $this->processoMni->revelar = [$vazio => 'text/html'];
+    $dono = solicitanteFluxoOcr('dono');
+
+    $pedido = duranteFluxoOcr(fn () => expect202FluxoOcr(pedirOcrFluxo($dono), [
+        'total' => 1, 'processados' => 0, 'com_erro' => 0, 'ignorados' => 0, 'situacao' => 'em_andamento',
+    ]));
+
+    expect(downloadsFluxoOcr($pedido['soap']))->toBe([$vazio])
+        ->and($pedido['workflow'])->toBe([POST_FLUXO_OCR])
+        ->and($pedido['avisos'])->toBe([]);
+
+    [$corpo] = corposDosEnviosFluxoOcr();
+    $documento = documentoFluxoOcr($vazio);
+    $caminhoDaUrl = rawurldecode((string) parse_url($corpo['url'], PHP_URL_PATH));
+
+    expect($documento->mimetype)->toBe('text/html')
+        ->and($documento->path)->toEndWith("/{$vazio}.pdf")
+        ->and($documento->path_html)->toEndWith("/{$vazio}.html")
+        ->and(Storage::disk('s3')->exists($documento->path))->toBeTrue()
+        ->and(Storage::disk('s3')->exists($documento->path_html))->toBeTrue()
+        ->and($caminhoDaUrl)->toEndWith($documento->path)
+        ->and($corpo['url'])->not->toContain('.html')
+        ->and($corpo['filename'])->toBe("{$vazio}.pdf")
+        ->and($corpo['metadata']['mimetype'])->toBe('text/html');
+
+    retornarTodosFluxoOcr([$vazio]);
+
+    expect(resumoDosAvisosFluxoOcr($dono))->toBe(['em_andamento 1/0', 'concluido 1/0']);
+    conferirAvisosFluxoOcr();
+    expectFalhasDaFilaFluxoOcr([]);
+});
+
+it('(c) só 1 vazio revelado video/mp4: 0 envios, 1 em_andamento por assinante com total −1 e ignorados +1, depois o final concluido, e /processo/visualizar mostra video/mp4 ignorado (RF-11, RNF-05)', function () {
+    ['pdf' => $pdf, 'video' => $video, 'primeiro' => $primeiro, 'dono' => $dono, 'carona' => $carona, 'revelacao' => $revelacao]
+        = videoReveladoFluxoOcr();
+
+    // 1 SOAP de download com o par do dono e nenhum envio.
+    expect(downloadsFluxoOcr($revelacao['soap']))->toBe([$video])
+        ->and($revelacao['soap'])->toHaveCount(1)
+        ->and($revelacao['workflow'])->toBe([])
+        ->and(documentosDosJobsFluxoOcr($revelacao['jobs'], EnviarDocumentoAoOcrJob::class))->toBe([]);
+    expectSoapComOParFluxoOcr($revelacao['soap'], $dono);
+
+    // Antes: total 2 e ignorados 0. Cada assinante recebe 1 em_andamento com
+    // total 1 e ignorados 1, e depois o final, com as mesmas contagens.
+    $contagens = ['numero_processo' => NUMERO_FLUXO_OCR, 'tribunal_id' => $this->tribunal->id, 'total' => 1, 'processados' => 1, 'com_erro' => 0, 'ignorados' => 1];
+
+    foreach ([$dono, $carona] as $assinante) {
+        expect(avisosEntreguesFluxoOcr($assinante))->toBe([
+            [...$contagens, 'situacao' => 'em_andamento'],
+            [...$contagens, 'situacao' => 'concluido'],
+        ]);
+    }
+
+    expect($revelacao['avisos'])->toHaveCount(4)
+        ->and(resumoDosAvisosFluxoOcr($primeiro))->toBe(['em_andamento 1/0', 'concluido 1/0'])
+        ->and(processamentosFluxoOcr()[1]->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO);
+
+    $documento = documentoFluxoOcr($video);
+
+    expect($documento->mimetype)->toBe('video/mp4')
+        ->and($documento->path)->toEndWith("/{$video}.mp4")
+        ->and($documento->status)->toBe(ProcessoDocumento::STATUS_BAIXADO)
+        ->and($documento->ocr_situacao)->toBeNull();
+
+    $lista = visualizarFluxoOcr($dono);
+
+    expect(documentoNaListaFluxoOcr($lista, $video))->toMatchArray(['mimetype' => 'video/mp4', 'ocr_situacao' => 'ignorado'])
+        ->and(documentoNaListaFluxoOcr($lista, $pdf))->toMatchArray(['mimetype' => 'application/pdf', 'ocr_situacao' => 'processado']);
+    conferirAvisosFluxoOcr();
+    expectFalhasDaFilaFluxoOcr([]);
+});
+
+it('(d) vazio que continua vazio no download: erro com o texto fixo, aviso com com_erro +1 e 0 envios; /processo/visualizar mostra erro, e o pedido seguinte devolve o documento à fila de download (RF-12, D-08, LIM-02)', function () {
+    $vazio = PRIMEIRO_DOCUMENTO_FLUXO_OCR + 30;
+    $this->processoMni->documentos = [$vazio => ''];
+    $dono = solicitanteFluxoOcr('dono');
+    $segundo = solicitanteFluxoOcr('segundo');
+
+    $pedido = duranteFluxoOcr(fn () => expect202FluxoOcr(pedirOcrFluxo($dono), [
+        'total' => 1, 'processados' => 0, 'com_erro' => 0, 'ignorados' => 0, 'situacao' => 'em_andamento',
+    ]));
+
+    $documento = documentoFluxoOcr($vazio);
+
+    expect(downloadsFluxoOcr($pedido['soap']))->toBe([$vazio])
+        ->and($pedido['workflow'])->toBe([])
+        ->and($documento->mimetype)->toBe('')
+        ->and($documento->ocr_situacao)->toBe(ProcessoDocumento::OCR_ERRO)
+        ->and($documento->ocr_erro)->toBe('mimetype não informado pelo tribunal')
+        ->and($documento->path)->toEndWith("/{$vazio}.dat")
+        ->and($documento->status)->toBe(ProcessoDocumento::STATUS_BAIXADO)
+        // com_erro de 0 para 1 no aviso, e o final sem pendente nem aguardando.
+        ->and(resumoDosAvisosFluxoOcr($dono))->toBe(['em_andamento 0/1', 'concluido 0/1'])
+        ->and(avisosEntreguesFluxoOcr($dono)[0])->toMatchArray(['total' => 1, 'com_erro' => 1, 'ignorados' => 0])
+        ->and(processamentosFluxoOcr()[0]->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO);
+    expectSoapComOParFluxoOcr($pedido['soap'], $dono);
+
+    expect(documentoNaListaFluxoOcr(visualizarFluxoOcr($dono), $vazio))->toMatchArray(['mimetype' => '', 'ocr_situacao' => 'erro']);
+
+    // D-08: o com_erro volta a pendente na abertura seguinte, com 1 job em
+    // `ocr-download` e nenhum direto ao envio; o 202 sai com com_erro 0.
+    $seguinte = duranteFluxoOcr(fn () => expect202FluxoOcr(pedirOcrFluxo($segundo), [
+        'total' => 1, 'processados' => 0, 'com_erro' => 0, 'ignorados' => 0, 'situacao' => 'em_andamento',
+    ]));
+
+    $downloads = array_values(array_filter($seguinte['jobs'], fn (object $job) => $job instanceof BaixarDocumentoParaOcrJob));
+
+    expect(documentosDosJobsFluxoOcr($seguinte['jobs'], BaixarDocumentoParaOcrJob::class))->toBe([$vazio])
+        ->and($downloads[0]->queue)->toBe(BaixarDocumentoParaOcrJob::FILA)
+        ->and($downloads[0]->processamentoId)->toBe(processamentosFluxoOcr()[1]->id)
+        ->and(documentosDosJobsFluxoOcr($seguinte['jobs'], EnviarDocumentoAoOcrJob::class))->toBe([])
+        ->and(downloadsFluxoOcr($seguinte['soap']))->toBe([$vazio])
+        ->and($seguinte['workflow'])->toBe([])
+        ->and(resumoDosAvisosFluxoOcr($segundo))->toBe(['em_andamento 0/1', 'concluido 0/1']);
+    expectSoapComOParFluxoOcr($seguinte['soap'], $segundo);
+    conferirAvisosFluxoOcr();
+    expectFalhasDaFilaFluxoOcr([]);
+});
+
+it('(e) depois do vídeo revelado, um pedido cuja lista devolve vazio para ele: continua video/mp4, ignorados igual e 0 download dele (RF-14)', function () {
+    ['pdf' => $pdf, 'video' => $video] = videoReveladoFluxoOcr();
+    $novo = solicitanteFluxoOcr('novo');
+
+    // A lista continua sem o mimetype do vídeo, com outra descrição: a
+    // gravação da lista roda, e só o mimetype não é trocado por ''.
+    expect($this->processoMni->documentos[$video])->toBe('');
+    $this->processoMni->descricoes[$video] = 'Vídeo da audiência (lista nova)';
+
+    $pedido = duranteFluxoOcr(fn () => expect202FluxoOcr(pedirOcrFluxo($novo), [
+        'total' => 1, 'processados' => 1, 'com_erro' => 0, 'ignorados' => 1, 'situacao' => 'concluido',
+    ]));
+
+    $documento = documentoFluxoOcr($video);
+
+    expect($pedido['soap'])->toHaveCount(1)
+        ->and(downloadsFluxoOcr($pedido['soap']))->toBe([])
+        ->and($pedido['jobs'])->toBe([])
+        ->and($pedido['workflow'])->toBe([])
+        ->and($pedido['avisos'])->toBe([])
+        ->and($documento->mimetype)->toBe('video/mp4')
+        ->and($documento->descricao)->toBe('Vídeo da audiência (lista nova)')
+        ->and(processamentosFluxoOcr())->toHaveCount(2)
+        ->and(documentoFluxoOcr($pdf)->ocr_situacao)->toBe(ProcessoDocumento::OCR_PROCESSADO);
+    conferirAvisosFluxoOcr();
+    expectFalhasDaFilaFluxoOcr([]);
+});
+
+it('(f) depois do vídeo revelado, o BaixarProcessoMNIJob com a lista devolvendo vazio: /processo/visualizar mostra video/mp4 e ignorado (RF-14)', function () {
+    ['video' => $video, 'dono' => $dono] = videoReveladoFluxoOcr();
+
+    $this->processoMni->descricoes[$video] = 'Vídeo da audiência (atualização)';
+
+    // A atualização em segundo plano (DEP-08) grava a lista inteira com o
+    // vazio; o vídeo já está baixado, e nada vai ao download de binários.
+    $atualizacao = duranteFluxoOcr(fn () => BaixarProcessoMNIJob::dispatch($this->tribunal, NUMERO_FLUXO_OCR, $dono['login_pje'], $dono['senha_pje']));
+
+    $documento = documentoFluxoOcr($video);
+
+    expect($atualizacao['soap'])->toHaveCount(3)
+        ->and(downloadsFluxoOcr($atualizacao['soap']))->toBe([])
+        ->and($atualizacao['avisos'])->toBe([])
+        ->and($documento->descricao)->toBe('Vídeo da audiência (atualização)')
+        ->and($documento->mimetype)->toBe('video/mp4');
+    expectSoapComOParFluxoOcr($atualizacao['soap'], $dono);
+
+    expect(documentoNaListaFluxoOcr(visualizarFluxoOcr($dono), $video))->toMatchArray([
+        'mimetype' => 'video/mp4',
+        'descricao' => 'Vídeo da audiência (atualização)',
+        'ocr_situacao' => 'ignorado',
+    ]);
+    expectFalhasDaFilaFluxoOcr([]);
+});
+
+it('(g) o único pendente é um vazio na fila de download, regravado video/mp4 pela lista antes do job: 0 SOAP, 0 envios, 0 em_andamento e o final concluido por assinante (RF-13, Q-05)', function () {
+    Queue::fake([BaixarDocumentoParaOcrJob::class]);
+
+    $vazio = PRIMEIRO_DOCUMENTO_FLUXO_OCR + 70;
+    $this->processoMni->documentos = [$vazio => ''];
+    $dono = solicitanteFluxoOcr('dono');
+    $carona = solicitanteFluxoOcr('carona');
+    $abertura = ['total' => 1, 'processados' => 0, 'com_erro' => 0, 'ignorados' => 0, 'situacao' => 'em_andamento'];
+
+    expect202FluxoOcr(pedirOcrFluxo($dono), $abertura);
+    expect202FluxoOcr(pedirOcrFluxo($carona), $abertura);
+
+    $job = Queue::pushed(BaixarDocumentoParaOcrJob::class)->sole();
+    expect($job->documentoId)->toBe(documentoFluxoOcr($vazio)->id)
+        ->and($job->queue)->toBe(BaixarDocumentoParaOcrJob::FILA);
+
+    // Com o download na fila, a atualização em segundo plano (DEP-08) grava a
+    // lista, que agora informa "video/mp4". O download de binários dela
+    // (`mni-download`) fica na fila, com os workers ocupados.
+    $this->processoMni->documentos[$vazio] = 'video/mp4';
+    $this->fila->reter = [BaixarDocumentoMNIJob::class, BaixarDocumentosMNIEmLoteJob::class];
+
+    $atualizacao = duranteFluxoOcr(fn () => BaixarProcessoMNIJob::dispatch($this->tribunal, NUMERO_FLUXO_OCR, $dono['login_pje'], $dono['senha_pje']));
+
+    expect(documentoFluxoOcr($vazio)->mimetype)->toBe('video/mp4')
+        ->and(downloadsFluxoOcr($atualizacao['soap']))->toBe([])
+        ->and($atualizacao['avisos'])->toBe([]);
+
+    // O download do OCR roda depois: sai pelo mimetype fora da lista.
+    $saida = duranteFluxoOcr(fn () => $this->fila->push($job));
+
+    expect($saida['soap'])->toBe([])
+        ->and($saida['workflow'])->toBe([])
+        ->and(documentosDosJobsFluxoOcr($saida['jobs'], EnviarDocumentoAoOcrJob::class))->toBe([])
+        ->and(processamentosFluxoOcr()[0]->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO);
+
+    foreach ([$dono, $carona] as $assinante) {
+        expect(avisosEmAndamentoFluxoOcr($assinante))->toBe([])
+            ->and(avisosEntreguesFluxoOcr($assinante))->toBe([[
+                'numero_processo' => NUMERO_FLUXO_OCR,
+                'tribunal_id' => $this->tribunal->id,
+                'total' => 0,
+                'processados' => 0,
+                'com_erro' => 0,
+                'ignorados' => 1,
+                'situacao' => 'concluido',
+            ]]);
+    }
+
+    expect($saida['avisos'])->toHaveCount(2);
+    conferirAvisosFluxoOcr();
+    expectFalhasDaFilaFluxoOcr([]);
+});
+
+it('(g) o mesmo cenário com outro documento ainda pendente: o job sai com 0 avisos, e o processamento segue em_andamento até o retorno do outro (RF-13, Q-05)', function () {
+    Queue::fake([BaixarDocumentoParaOcrJob::class]);
+
+    $vazio = PRIMEIRO_DOCUMENTO_FLUXO_OCR + 70;
+    [$pdf] = documentosNoMniFluxoOcr(1, [$vazio => '']);
+    $dono = solicitanteFluxoOcr('dono');
+
+    expect202FluxoOcr(pedirOcrFluxo($dono), ['total' => 2, 'processados' => 0, 'com_erro' => 0, 'ignorados' => 0, 'situacao' => 'em_andamento']);
+
+    $jobs = Queue::pushed(BaixarDocumentoParaOcrJob::class)->keyBy(fn (BaixarDocumentoParaOcrJob $job) => ProcessoDocumento::findOrFail($job->documentoId)->id_documento);
+    expect($jobs->keys()->sort()->values()->all())->toBe([$pdf, $vazio]);
+
+    $this->processoMni->documentos[$vazio] = 'video/mp4';
+    $this->fila->reter = [BaixarDocumentoMNIJob::class, BaixarDocumentosMNIEmLoteJob::class];
+    BaixarProcessoMNIJob::dispatch($this->tribunal, NUMERO_FLUXO_OCR, $dono['login_pje'], $dono['senha_pje']);
+
+    expect(documentoFluxoOcr($vazio)->mimetype)->toBe('video/mp4');
+
+    $saida = duranteFluxoOcr(fn () => $this->fila->push($jobs[$vazio]));
+
+    expect($saida['soap'])->toBe([])
+        ->and($saida['workflow'])->toBe([])
+        ->and($saida['avisos'])->toBe([])
+        ->and(processamentosFluxoOcr()[0]->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_EM_ANDAMENTO);
+
+    // O outro segue o fluxo de sempre e encerra o processamento, com o vídeo em ignorados.
+    $outro = duranteFluxoOcr(fn () => $this->fila->push($jobs[$pdf]));
+
+    expect(downloadsFluxoOcr($outro['soap']))->toBe([$pdf])
+        ->and($outro['workflow'])->toBe([POST_FLUXO_OCR]);
+
+    retornarTodosFluxoOcr([$pdf]);
+
+    expect(resumoDosAvisosFluxoOcr($dono))->toBe(['em_andamento 1/0', 'concluido 1/0'])
+        ->and(last(avisosEntreguesFluxoOcr($dono)))->toMatchArray(['total' => 1, 'processados' => 1, 'ignorados' => 1])
+        ->and(processamentosFluxoOcr()[0]->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO);
+    conferirAvisosFluxoOcr();
+    expectFalhasDaFilaFluxoOcr([]);
 });

@@ -65,6 +65,10 @@ const RECUSA_SIGILO = 'Erro ao realizar login via MNI. exception invoking: login
 const PRIMEIRO_DOCUMENTO_SIGILO = 9400001;
 
 beforeEach(function () {
+    // O banco de dev pode ter processamentos reais em andamento (homologação):
+    // o `ocr:acompanhar` só pode ver os deste teste.
+    isolarProcessamentosOcrDoBancoDeDev();
+
     $this->freezeSecond();
     $this->minutoZero = now()->toImmutable();
     Storage::fake('s3');
@@ -126,12 +130,15 @@ afterEach(function () {
  * `->lista` pode trocar a resposta da consulta do processo; os ids em
  * `->falhar` falham sempre no download, sem `loginfailed`; e o par de
  * `->recusarAPartirDe` (`[login => n]`) é recusado a partir do n-ésimo
- * download.
+ * download. O download informa o mimetype de `->revelar` (`[id =>
+ * mimetype]`) quando o id está lá: é a revelação do mimetype que a lista
+ * mandou `''` (RF-09).
  */
 function mniSigilo(): stdClass
 {
     $mni = new stdClass;
     $mni->documentos = [];
+    $mni->revelar = [];
     $mni->lista = null;
     $mni->falhar = [];
     $mni->recusarAPartirDe = [];
@@ -174,9 +181,11 @@ function mniSigilo(): stdClass
             throw new SoapFault('Server', 'Could not connect to host');
         }
 
+        $mimetype = array_key_exists($id, $mni->revelar) ? $mni->revelar[$id] : $mni->documentos[$id];
+
         return (object) [
             'sucesso' => true,
-            'processo' => (object) ['documento' => documentoMniFake($id, ['mimetype' => $mni->documentos[$id]])],
+            'processo' => (object) ['documento' => documentoMniFake($id, ['mimetype' => $mimetype])],
         ];
     });
 
@@ -565,6 +574,50 @@ it('envio, consulta do job antes do reenvio, retorno, aviso e acompanhamento at�
         'POST /documents/process', 'GET /jobs/job-1', 'DELETE /jobs/job-1/chunks', 'POST /documents/process', 'GET /jobs/job-2',
     ])->and(linhasColetadasSigilo())->toContain('VerificarReenvioOcrJob')
         ->and(array_column(avisosSigilo(), 'situacao'))->toBe(['falhou']);
+    expectParNoMniSigilo(LOGIN_SIGILO, SENHA_SIGILO);
+    expectSemSegredosSigilo();
+})->with($debug);
+
+it('revelação do mimetype pelo download (vídeo e vazio), com o envio, o retorno, os avisos e o pedido concluido: o par e o callback_token não vazam nos logs novos, nas linhas nem nos payloads (RNF-01; RF-09, RF-11, RF-12)', function (bool $debug) {
+    config()->set('app.debug', $debug);
+    [$pdf] = documentosSigilo(1);
+    $video = PRIMEIRO_DOCUMENTO_SIGILO + 10;
+    $vazio = PRIMEIRO_DOCUMENTO_SIGILO + 11;
+    $this->mni->documentos += [$video => '', $vazio => ''];
+    $this->mni->revelar = [$video => 'video/mp4', $vazio => ''];
+
+    // Os 2 vazios contam em `total` como pendentes (RF-07).
+    pedirSigilo(corpoSigilo())->assertStatus(202)->assertJson(['situacao' => 'em_andamento', 'total' => 3, 'ignorados' => 0]);
+    pedirSigilo(corpoSigilo(carona: true), TOKEN_API_CARONA_SIGILO)->assertStatus(202)->assertJsonPath('situacao', 'em_andamento');
+
+    esvaziarFilaSigilo();
+    retornoSigilo($pdf)->assertOk();
+    esvaziarFilaSigilo();
+
+    pedirSigilo(corpoSigilo())->assertStatus(202)->assertJsonPath('situacao', 'em_andamento');
+    esvaziarFilaSigilo();
+
+    $documentos = DB::table('processo_documentos')
+        ->whereIn('processo_id', Processo::query()->toBase()->where('tribunal_id', $this->tribunal->id)->pluck('id'))
+        ->get()
+        ->keyBy('id_documento');
+
+    // O vídeo foi revelado e saiu de `total`; o vazio virou com_erro no 1º
+    // pedido e voltou à fila de download no 2º (D-08), com 1 SOAP em cada.
+    expect($documentos[$video]->mimetype)->toBe('video/mp4')
+        ->and($documentos[$vazio]->mimetype)->toBe('')
+        ->and($documentos[$vazio]->ocr_situacao)->toBe('erro')
+        ->and($documentos[$vazio]->ocr_erro)->toBe('mimetype não informado pelo tribunal')
+        ->and(chamadasAoWorkflowSigilo())->toBe(['POST /documents/process'])
+        ->and($this->mni->downloads[LOGIN_SIGILO])->toBe(4)
+        ->and(last(avisosSigilo()))->toMatchArray(['situacao' => 'concluido', 'total' => 2, 'processados' => 1, 'com_erro' => 1, 'ignorados' => 1])
+        ->and(DB::table('failed_jobs')->where('id', '>', $this->ultimoJobFalho)->count())->toBe(0);
+
+    // Os logs novos da revelação e o download cifrado passaram pela coleta.
+    expect(implode("\n", $this->coleta->logs))->toContain('mimetype revelado')
+        ->toContain('video/mp4')
+        ->and(linhasColetadasSigilo())->toContain('BaixarDocumentoParaOcrJob')
+        ->toContain('EnviarAvisoOcrJob');
     expectParNoMniSigilo(LOGIN_SIGILO, SENHA_SIGILO);
     expectSemSegredosSigilo();
 })->with($debug);
