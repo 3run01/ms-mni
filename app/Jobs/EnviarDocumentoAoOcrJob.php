@@ -6,6 +6,7 @@ use App\Exceptions\FalhaTransitoriaWorkflowOcrException;
 use App\Models\ProcessoDocumento;
 use App\Models\ProcessoOcrProcessamento;
 use App\Services\Ocr\ClienteWorkflowOcr;
+use App\Services\Ocr\FormatosOcr;
 use App\Services\Ocr\MontarEnvioOcrService;
 use App\Services\Ocr\ProcessamentoOcrService;
 use App\Services\Processo\SalvarDocumentoProcessoService;
@@ -30,6 +31,10 @@ use Throwable;
  * - 5xx, tempo esgotado ou falha de rede, no `DELETE` ou no `POST`: relança
  *   para a fila tentar de novo; esgotadas as tentativas, `failed()` marca
  *   `com_erro`. O documento não é reenviado sem o 200 do `DELETE`.
+ *
+ * Mimetype fora da lista legível, `''` inclusive, nunca chega ao workflow
+ * (RF-13): o job sai sem requisição e sem falhar, e
+ * `MontarEnvioOcrService::corpo` segue como a última barreira.
  */
 class EnviarDocumentoAoOcrJob implements ShouldBeUnique, ShouldQueue
 {
@@ -101,7 +106,16 @@ class EnviarDocumentoAoOcrJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        // 3. Sem o objeto no S3 não há o que mandar (D3). O binário também
+        // 3. Só mimetype da lista legível vai ao workflow (RF-13). Sem
+        //    `DELETE`, sem `POST`, sem erro definitivo e sem aviso
+        //    intermediário: não é falha do envio.
+        if (! FormatosOcr::ehLegivel($documento->mimetype)) {
+            $this->sairSemMimetypeLegivel($documento, $processamentos);
+
+            return;
+        }
+
+        // 4. Sem o objeto no S3 não há o que mandar (D3). O binário também
         //    vira `erro`, para que a reabertura baixe de novo do MNI.
         if (! $this->temObjetoNoS3($documento)) {
             $processamentos->registrarErroDefinitivo($documento, 'Objeto do documento ausente no S3 no envio ao OCR');
@@ -110,14 +124,14 @@ class EnviarDocumentoAoOcrJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        // 4. Reenvio de documento que já teve job (R2-2): cancela o job
+        // 5. Reenvio de documento que já teve job (R2-2): cancela o job
         //    antigo antes do novo POST. A falha relança, e o documento não
         //    é reenviado sem o 200 do DELETE (RF-18 item 3).
         if (filled($documento->ocr_job_id_cancelar)) {
             $this->cancelarJobAntigo($documento, $workflow);
         }
 
-        // 5. Envio. A exceção transitória relança para a nova tentativa.
+        // 6. Envio. A exceção transitória relança para a nova tentativa.
         $resultado = $workflow->enviarDocumento($montarEnvio->corpo($documento));
 
         if ($resultado->aceito) {
@@ -167,6 +181,36 @@ class EnviarDocumentoAoOcrJob implements ShouldBeUnique, ShouldQueue
         Log::error("[ProcessamentoOcr:{$this->processamentoId}] envio do documento {$this->documentoId} ao OCR esgotou as tentativas", [
             'erro' => $e !== null ? class_basename($e) : null,
             'status' => $e instanceof FalhaTransitoriaWorkflowOcrException ? $e->statusHttp : null,
+        ]);
+    }
+
+    /**
+     * Documento com mimetype fora da lista legível no envio (RF-13).
+     *
+     * - Conhecido e fora da lista (por exemplo, regravado pela lista depois
+     *   do despacho): saída Q-05 (DP-07). O documento já conta em
+     *   `ignorados`, e o processamento só termina `concluido`, com o aviso
+     *   final, quando nada mais resta.
+     * - `''` (DP-08): inalcançável, porque o pedido e o download nunca mandam
+     *   o vazio ao envio. O documento fica pendente, sem mudar a situação, e
+     *   o prazo P encerra o processamento se ninguém o revelar.
+     */
+    private function sairSemMimetypeLegivel(ProcessoDocumento $documento, ProcessamentoOcrService $processamentos): void
+    {
+        if ($documento->mimetype === FormatosOcr::MIMETYPE_NAO_INFORMADO) {
+            Log::warning("[ProcessoDocumento:{$documento->id}] envio ao OCR com mimetype não informado; documento não enviado e mantido pendente", [
+                'processamento_id' => $this->processamentoId,
+            ]);
+
+            return;
+        }
+
+        $concluido = $processamentos->concluirSeNadaResta($this->processamentoId);
+
+        Log::info("[ProcessoDocumento:{$documento->id}] mimetype fora da lista no envio ao OCR; documento não enviado", [
+            'mimetype' => $documento->mimetype,
+            'processamento_id' => $this->processamentoId,
+            'processamento_concluido' => $concluido,
         ]);
     }
 

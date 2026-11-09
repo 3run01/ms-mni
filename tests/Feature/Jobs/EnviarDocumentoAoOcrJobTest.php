@@ -19,6 +19,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -635,3 +636,75 @@ it('failed() não muda documento já enviado ou processado', function (string $s
     'enviado' => [ProcessoDocumento::OCR_ENVIADO],
     'processado' => [ProcessoDocumento::OCR_PROCESSADO],
 ]);
+
+// ---------- só mimetype legível vai ao workflow (T12; RF-13, Q-05, DP-07, DP-08) ----------
+
+it('mimetype conhecido fora da lista, baixado no S3 e sem mais nada a ler: 0 requisições, sem exceção, documento igual e concluido com 1 final por assinante (RF-13, Q-05)', function (string $mimetype, string $extensao) {
+    Queue::fake([EnviarAvisoOcrJob::class]);
+    // Com job antigo a cancelar: sem a guarda, o envio faria o DELETE.
+    [$processamento, $documento] = cenarioEnvioOcrJob(['ocr_job_id_cancelar' => JOB_ANTIGO_ENVIO_OCR_JOB], $mimetype, $extensao);
+    simularWorkflowEnvioOcrJob();
+    $antes = estadoOcrEnvioOcrJob($documento);
+
+    rodarEnvioOcrJob($processamento, $documento)->assertNotFailed()->assertNotReleased();
+
+    $finais = ProcessoOcrAviso::query()->where('final', true)->get();
+
+    Http::assertNothingSent();
+    expect(estadoOcrEnvioOcrJob($documento))->toBe($antes)
+        ->and($documento->fresh()->mimetype)->toBe($mimetype)
+        ->and($documento->fresh()->path)->toBe($documento->path)
+        ->and($this->mni->requisicoes)->toBe([])
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO)
+        ->and(ProcessoOcrAviso::query()->where('final', false)->count())->toBe(0)
+        ->and($finais)->toHaveCount(2)
+        ->and($finais->pluck('assinante_id')->unique())->toHaveCount(2)
+        ->and($finais->every(fn (ProcessoOcrAviso $aviso) => $aviso->payload['situacao'] === 'concluido'
+            && $aviso->payload['total'] === 0
+            && $aviso->payload['ignorados'] === 1))->toBeTrue();
+})->with([
+    'áudio' => ['audio/mpeg', 'mp3'],
+    'vídeo' => ['video/mp4', 'mp4'],
+]);
+
+it('mimetype conhecido fora da lista com outro documento pendente: 0 requisições, 0 avisos e o processamento continua em_andamento (RF-13, Q-05)', function () {
+    Queue::fake([EnviarAvisoOcrJob::class]);
+    [$processamento, $documento] = cenarioEnvioOcrJob([], 'audio/mpeg', 'mp3');
+    criarDocumentosLote([['ocr_situacao' => null]], $documento->processo);
+    simularWorkflowEnvioOcrJob();
+    $antes = estadoOcrEnvioOcrJob($documento);
+
+    rodarEnvioOcrJob($processamento, $documento)->assertNotFailed()->assertNotReleased();
+
+    Http::assertNothingSent();
+    expect(estadoOcrEnvioOcrJob($documento))->toBe($antes)
+        ->and($documento->fresh()->mimetype)->toBe('audio/mpeg')
+        ->and(ProcessoOcrAviso::count())->toBe(0)
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_EM_ANDAMENTO)
+        ->and($processamento->fresh()->finalizado_em)->toBeNull();
+});
+
+it('mimetype vazio no envio: 0 requisições, sem exceção, warning e o documento continua pendente, sem erro e sem aviso (DP-08)', function () {
+    Queue::fake([EnviarAvisoOcrJob::class]);
+    [$processamento, $documento] = cenarioEnvioOcrJob(['ocr_job_id_cancelar' => JOB_ANTIGO_ENVIO_OCR_JOB], '', 'dat');
+    simularWorkflowEnvioOcrJob();
+    $antes = estadoOcrEnvioOcrJob($documento);
+    Log::spy();
+
+    rodarEnvioOcrJob($processamento, $documento)->assertNotFailed()->assertNotReleased();
+
+    Http::assertNothingSent();
+    expect(estadoOcrEnvioOcrJob($documento))->toBe($antes)
+        ->and($documento->fresh()->mimetype)->toBe('')
+        ->and($documento->fresh()->ocr_situacao)->toBeNull()
+        ->and(contagemEnvioOcrJob($documento)->pendentes)->toBe(1)
+        ->and(contagemEnvioOcrJob($documento)->comErro)->toBe(0)
+        ->and(ProcessoOcrAviso::count())->toBe(0)
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_EM_ANDAMENTO);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(fn (string $mensagem, array $contexto = []) => str_starts_with($mensagem, "[ProcessoDocumento:{$documento->id}]")
+            && str_contains($mensagem, 'mimetype não informado')
+            && $contexto === ['processamento_id' => $processamento->id])
+        ->once();
+});

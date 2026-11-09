@@ -572,3 +572,372 @@ it('10 documentos com recusa a partir do 4º download: 0 SOAP depois, com_erro s
     Http::assertNotSent(fn (Request $request) => str_contains(json_encode($request->data()), LOGIN_DONO_DOWNLOAD_OCR)
         || str_contains(json_encode($request->data()), SENHA_DONO_DOWNLOAD_OCR));
 });
+
+// ---------- mimetype vazio: revelação pelo tribunal (T11; RF-09 a RF-13, RNF-05) ----------
+
+/**
+ * O tribunal simulado devolve o documento `$documento` com o mimetype
+ * `$revelado` (o da lista é `''`). `$antes` roda antes da resposta, como uma
+ * gravação da lista concorrente com a chamada SOAP.
+ *
+ * @return array<int, Closure> no formato de `$falhas` de respostaMniDownloadOcr
+ */
+function revelacaoMniDownloadOcr(ProcessoDocumento $documento, string $revelado, ?Closure $antes = null): array
+{
+    return [$documento->id_documento => function () use ($documento, $revelado, $antes) {
+        if ($antes !== null) {
+            $antes();
+        }
+
+        return (object) ['sucesso' => true, 'processo' => (object) ['documento' => documentoMniFake($documento->id_documento, [
+            'mimetype' => $revelado,
+            'conteudo' => $revelado === 'text/html'
+                ? "<html><body><p>Documento revelado {$documento->id_documento}</p></body></html>"
+                : "conteudo-revelado-{$documento->id_documento}",
+        ])]];
+    }];
+}
+
+function caminhoDownloadOcr(Processo $processo, ProcessoDocumento $documento, string $extensao): string
+{
+    return "documentos-processos/{$processo->numero_processo}/{$documento->id_documento}.{$extensao}";
+}
+
+/** @return \Illuminate\Support\Collection<int, ProcessoOcrAviso> */
+function avisosDoAssinanteDownloadOcr(ProcessoOcrAssinante $assinante): \Illuminate\Support\Collection
+{
+    return ProcessoOcrAviso::query()->where('assinante_id', $assinante->id)->orderBy('id')->get();
+}
+
+/** @return \Illuminate\Support\Collection<int, ProcessoOcrAssinante> */
+function assinantesDownloadOcr(ProcessoOcrProcessamento $processamento): \Illuminate\Support\Collection
+{
+    return ProcessoOcrAssinante::query()->where('processamento_id', $processamento->id)->orderBy('id')->get();
+}
+
+/**
+ * As 2 invariantes de RF-07 em todo aviso: `processados + com_erro ≤ total`
+ * e `total + ignorados` = documentos do processo no banco.
+ */
+function expectInvariantesAvisoDownloadOcr(array $payload, Processo $processo): void
+{
+    expect($payload['processados'] + $payload['com_erro'])->toBeLessThanOrEqual($payload['total'])
+        ->and($payload['total'] + $payload['ignorados'])
+        ->toBe(ProcessoDocumento::query()->where('processo_id', $processo->id)->count());
+}
+
+it('vazio pendente revelado legível: grava o mimetype e o objeto pelo revelado, 1 SOAP com o par do dono, 1 envio em ocr-envio e 0 avisos (RF-09, RF-10)', function (string $revelado) {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos, $processo] = cenarioDownloadOcr([['mimetype' => '']]);
+    $documento = $documentos->first();
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr(revelacaoMniDownloadOcr($documento, $revelado)));
+    $progressoAntes = $processamento->fresh()->ultimo_progresso_em;
+
+    $this->travel(3)->minutes();
+    baixarParaOcr($processamento, $documento);
+
+    $documento->refresh();
+    $pdf = caminhoDownloadOcr($processo, $documento, 'pdf');
+
+    expect($documento->mimetype)->toBe($revelado)
+        ->and($documento->path)->toBe($pdf)
+        ->and($documento->status)->toBe(ProcessoDocumento::STATUS_BAIXADO)
+        ->and(Storage::disk('s3')->exists($pdf))->toBeTrue()
+        // A revelação não muda a situação do OCR: quem muda é o envio.
+        ->and($documento->ocr_situacao)->toBeNull()
+        ->and($this->mni->requisicoes)->toHaveCount(1)
+        ->and($this->mni->requisicoes[0]['parametros']['documento'])->toBe($documento->id_documento)
+        // RF-10: a revelação não é progresso.
+        ->and(ProcessoOcrAviso::count())->toBe(0)
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_EM_ANDAMENTO)
+        ->and($processamento->fresh()->ultimo_progresso_em?->toIso8601String())->toBe($progressoAntes?->toIso8601String());
+    expectSoapComOParDoDonoDownloadOcr($this->mni);
+
+    if ($revelado === 'text/html') {
+        expect($documento->path_html)->toBe(caminhoDownloadOcr($processo, $documento, 'html'))
+            ->and(Storage::disk('s3')->exists($documento->path_html))->toBeTrue();
+    }
+
+    Queue::assertPushedOn('ocr-envio', EnviarDocumentoAoOcrJob::class, fn (EnviarDocumentoAoOcrJob $job) => $job->processamentoId === $processamento->id
+        && $job->documentoId === $documento->id);
+    Queue::assertPushedTimes(EnviarDocumentoAoOcrJob::class, 1);
+})->with([
+    'PDF' => 'application/pdf',
+    'HTML' => 'text/html',
+]);
+
+it('vazio já baixado com o .dat no S3: o atalho do S3 não vale, e o tribunal é chamado 1 vez com o par do dono (RF-09 AC b, RF-13)', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos, $processo] = cenarioDownloadOcr([['mimetype' => '']]);
+    $documento = gravarNoS3DownloadOcr($documentos->first(), 'dat');
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr(revelacaoMniDownloadOcr($documento, 'application/pdf')));
+
+    baixarParaOcr($processamento, $documento);
+
+    $documento->refresh();
+
+    expect($this->mni->requisicoes)->toHaveCount(1)
+        ->and($documento->mimetype)->toBe('application/pdf')
+        ->and($documento->path)->toBe(caminhoDownloadOcr($processo, $documento, 'pdf'))
+        ->and($documento->status)->toBe(ProcessoDocumento::STATUS_BAIXADO);
+    expectSoapComOParDoDonoDownloadOcr($this->mni);
+    Queue::assertPushedTimes(EnviarDocumentoAoOcrJob::class, 1);
+});
+
+it('vazio revelado vídeo como único pendente: path .mp4, 0 envio, 1 em_andamento por assinante com total −1 e ignorados +1 e depois o final concluido (RF-11)', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos, $processo] = cenarioDownloadOcr([
+        ['mimetype' => 'application/pdf', 'ocr_situacao' => ProcessoDocumento::OCR_PROCESSADO],
+        ['mimetype' => ''],
+    ]);
+    $documento = $documentos[1];
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr(revelacaoMniDownloadOcr($documento, 'video/mp4')));
+    $antes = contagemDownloadOcr($processo);
+
+    expect([$antes->total, $antes->ignorados])->toBe([2, 0]);
+
+    baixarParaOcr($processamento, $documento);
+
+    $documento->refresh();
+    $mp4 = caminhoDownloadOcr($processo, $documento, 'mp4');
+
+    expect($documento->mimetype)->toBe('video/mp4')
+        ->and($documento->path)->toBe($mp4)
+        ->and(Storage::disk('s3')->exists($mp4))->toBeTrue()
+        ->and($documento->status)->toBe(ProcessoDocumento::STATUS_BAIXADO)
+        ->and($this->mni->requisicoes)->toHaveCount(1)
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO);
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+
+    $assinantes = assinantesDownloadOcr($processamento);
+
+    expect($assinantes)->toHaveCount(2);
+
+    foreach ($assinantes as $assinante) {
+        $avisos = avisosDoAssinanteDownloadOcr($assinante);
+
+        expect($avisos)->toHaveCount(2)
+            ->and($avisos[0]->final)->toBeFalse()
+            ->and($avisos[0]->payload)->toMatchArray([
+                'situacao' => 'em_andamento',
+                'total' => $antes->total - 1,
+                'ignorados' => $antes->ignorados + 1,
+            ])
+            ->and($avisos[1]->final)->toBeTrue()
+            ->and($avisos[1]->payload)->toMatchArray([
+                'situacao' => 'concluido',
+                'total' => $antes->total - 1,
+                'ignorados' => $antes->ignorados + 1,
+            ]);
+
+        $avisos->each(fn (ProcessoOcrAviso $aviso) => expectInvariantesAvisoDownloadOcr($aviso->payload, $processo));
+    }
+});
+
+it('vazio que o tribunal também não informa: erro com o texto fixo, objeto .dat, 0 envio e aviso com com_erro +1 (RF-12)', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    // Um 2º documento pendente mantém o processamento aberto depois do erro.
+    [$processamento, $documentos, $processo] = cenarioDownloadOcr([['mimetype' => ''], []]);
+    $documento = $documentos->first();
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr(revelacaoMniDownloadOcr($documento, '')));
+    $antes = contagemDownloadOcr($processo);
+
+    baixarParaOcr($processamento, $documento);
+
+    $documento->refresh();
+
+    expect($documento->mimetype)->toBe('')
+        ->and($documento->ocr_situacao)->toBe(ProcessoDocumento::OCR_ERRO)
+        ->and($documento->ocr_erro)->toBe('mimetype não informado pelo tribunal')
+        ->and($documento->path)->toBe(caminhoDownloadOcr($processo, $documento, 'dat'))
+        ->and($documento->status)->toBe(ProcessoDocumento::STATUS_BAIXADO)
+        ->and($this->mni->requisicoes)->toHaveCount(1)
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_EM_ANDAMENTO);
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+
+    foreach (assinantesDownloadOcr($processamento) as $assinante) {
+        $avisos = avisosDoAssinanteDownloadOcr($assinante);
+
+        expect($avisos)->toHaveCount(1)
+            ->and($avisos[0]->final)->toBeFalse()
+            ->and($avisos[0]->payload)->toMatchArray([
+                'situacao' => 'em_andamento',
+                'total' => $antes->total,
+                'com_erro' => $antes->comErro + 1,
+                'ignorados' => $antes->ignorados,
+            ]);
+        expectInvariantesAvisoDownloadOcr($avisos[0]->payload, $processo);
+    }
+});
+
+it('audio/mpeg baixado no S3 sem mais nada a ler: 0 SOAP, 0 envio, 0 em_andamento e concluido com 1 final por assinante (RF-13, Q-05)', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos, $processo] = cenarioDownloadOcr([
+        ['mimetype' => 'application/pdf', 'ocr_situacao' => ProcessoDocumento::OCR_PROCESSADO],
+        ['mimetype' => 'audio/mpeg'],
+    ]);
+    $documento = gravarNoS3DownloadOcr($documentos[1], 'mp3');
+    $antes = estadoDownloadOcr($documento);
+
+    baixarParaOcr($processamento, $documento);
+
+    $finais = ProcessoOcrAviso::query()->where('final', true)->get();
+
+    expect($this->mni->requisicoes)->toBe([])
+        ->and(estadoDownloadOcr($documento))->toBe($antes)
+        ->and($documento->fresh()->mimetype)->toBe('audio/mpeg')
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO)
+        ->and(ProcessoOcrAviso::query()->where('final', false)->count())->toBe(0)
+        ->and($finais)->toHaveCount(2)
+        ->and($finais->pluck('assinante_id')->unique())->toHaveCount(2)
+        ->and($finais->every(fn (ProcessoOcrAviso $aviso) => $aviso->payload['situacao'] === 'concluido'))->toBeTrue();
+    $finais->each(fn (ProcessoOcrAviso $aviso) => expectInvariantesAvisoDownloadOcr($aviso->payload, $processo));
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+});
+
+it('audio/mpeg baixado no S3 com outro documento pendente: 0 SOAP, 0 envio, 0 avisos e o processamento continua em_andamento (RF-13, Q-05)', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos] = cenarioDownloadOcr([[], ['mimetype' => 'audio/mpeg']]);
+    $documento = gravarNoS3DownloadOcr($documentos[1], 'mp3');
+    $antes = estadoDownloadOcr($documento);
+
+    baixarParaOcr($processamento, $documento);
+
+    expect($this->mni->requisicoes)->toBe([])
+        ->and(estadoDownloadOcr($documento))->toBe($antes)
+        ->and(ProcessoOcrAviso::count())->toBe(0)
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_EM_ANDAMENTO)
+        ->and($processamento->fresh()->finalizado_em)->toBeNull();
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+});
+
+it('recusa do par no vazio: encerra falhou por papel, sem relançar, sem com_erro e com o documento vazio e pendente', function (string $forma) {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos, $processo] = cenarioDownloadOcr([['mimetype' => '']], caronas: 2);
+    $documento = $documentos->first();
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr([
+        $documento->id_documento => match ($forma) {
+            'sucesso_false' => fn () => (object) ['sucesso' => false, 'mensagem' => TEXTO_RECUSA_DOWNLOAD_OCR],
+            'excecao_do_recibo' => fn () => throw new Exception(TEXTO_RECUSA_DOWNLOAD_OCR, 0),
+            'soap_fault' => fn () => throw new SoapFault('Server', TEXTO_RECUSA_DOWNLOAD_OCR),
+        },
+    ]));
+    $antes = estadoDownloadOcr($documento);
+    $falhasAntes = DB::table('failed_jobs')->count();
+
+    baixarParaOcr($processamento, $documento);
+
+    $processamento->refresh();
+    $finais = ProcessoOcrAviso::query()->with('assinante')->where('final', true)->get();
+
+    expect($this->mni->requisicoes)->toHaveCount(1)
+        ->and($processamento->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_FALHOU)
+        ->and($processamento->codigo_falha)->toBe('credencial_pje_recusada')
+        ->and($documento->fresh()->mimetype)->toBe('')
+        ->and(estadoDownloadOcr($documento))->toBe($antes)
+        ->and($documento->fresh()->ocr_situacao)->toBeNull()
+        ->and(contagemDownloadOcr($processo)->comErro)->toBe(0)
+        ->and(contagemDownloadOcr($processo)->pendentes)->toBe(1)
+        ->and(DB::table('failed_jobs')->count())->toBe($falhasAntes)
+        ->and(ProcessoOcrAviso::query()->where('final', false)->count())->toBe(0)
+        ->and($finais)->toHaveCount(3)
+        ->and($finais->every(fn (ProcessoOcrAviso $aviso) => $aviso->payload['situacao'] === 'falhou'))->toBeTrue()
+        ->and($finais->first(fn (ProcessoOcrAviso $aviso) => $aviso->assinante->dono)->payload['codigo'])->toBe('credencial_pje_recusada')
+        ->and($finais->reject(fn (ProcessoOcrAviso $aviso) => $aviso->assinante->dono)->pluck('payload.codigo')->unique()->all())
+        ->toBe(['credencial_de_outro_pedido_recusada']);
+    expectSoapComOParDoDonoDownloadOcr($this->mni);
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+})->with([
+    'sucesso false' => 'sucesso_false',
+    'exceção do recibo' => 'excecao_do_recibo',
+    'SoapFault' => 'soap_fault',
+]);
+
+it('falha comum no vazio: warning com a classe, relança, e o failed() registra o erro com o mimetype ainda vazio', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    // Um 2º documento pendente mantém o processamento aberto depois do com_erro.
+    [$processamento, $documentos] = cenarioDownloadOcr([['mimetype' => ''], []]);
+    $documento = $documentos->first();
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr([
+        $documento->id_documento => fn () => throw new SoapFault('Server', 'Could not connect to host'),
+    ]));
+    Log::spy();
+
+    // Fila `sync`: sem nova tentativa, a falha chama o failed() e sobe até aqui.
+    expect(fn () => baixarParaOcr($processamento, $documento))->toThrow(Exception::class);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(fn (string $mensagem, array $contexto = []) => $mensagem === "[ProcessoDocumento:{$documento->id}] download do OCR falhou"
+            && $contexto['erro'] === 'Exception'
+            && $contexto['processamento_id'] === $processamento->id
+            && ! str_contains(json_encode($contexto), LOGIN_DONO_DOWNLOAD_OCR)
+            && ! str_contains(json_encode($contexto), SENHA_DONO_DOWNLOAD_OCR))
+        ->once();
+
+    $documento->refresh();
+
+    expect($this->mni->requisicoes)->toHaveCount(1)
+        ->and($documento->mimetype)->toBe('')
+        ->and($documento->ocr_situacao)->toBe(ProcessoDocumento::OCR_ERRO)
+        ->and($documento->ocr_erro)->toContain('esgotou as tentativas')
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_EM_ANDAMENTO);
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+});
+
+it('o job 2 vezes no mesmo vazio revelado vídeo, com outro documento pendente: 1 aviso, 0 envios e 1 SOAP no total (RNF-05)', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos] = cenarioDownloadOcr([['mimetype' => ''], []], caronas: 0);
+    $documento = $documentos->first();
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr(revelacaoMniDownloadOcr($documento, 'video/mp4')));
+
+    baixarParaOcr($processamento, $documento);
+    baixarParaOcr($processamento, $documento);
+
+    expect($this->mni->requisicoes)->toHaveCount(1)
+        ->and(ProcessoOcrAviso::count())->toBe(1)
+        ->and(ProcessoOcrAviso::query()->sole()->final)->toBeFalse()
+        ->and($documento->fresh()->mimetype)->toBe('video/mp4')
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_EM_ANDAMENTO);
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+});
+
+it('lista regrava o vazio como vídeo durante a revelação (JaRevelado): segue pelo gravado, 1 SOAP, 0 envio, 0 em_andamento e concluido se nada resta (RNF-05, Q-05)', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos] = cenarioDownloadOcr([['mimetype' => '']]);
+    $documento = $documentos->first();
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr(revelacaoMniDownloadOcr(
+        $documento,
+        'application/pdf',
+        fn () => ProcessoDocumento::query()->whereKey($documento->id)->update(['mimetype' => 'video/mp4']),
+    )));
+
+    baixarParaOcr($processamento, $documento);
+
+    expect($this->mni->requisicoes)->toHaveCount(1)
+        // O valor da lista não é trocado pelo revelado.
+        ->and($documento->fresh()->mimetype)->toBe('video/mp4')
+        ->and($processamento->fresh()->situacao)->toBe(ProcessoOcrProcessamento::SITUACAO_CONCLUIDO)
+        ->and(ProcessoOcrAviso::query()->where('final', false)->count())->toBe(0)
+        ->and(ProcessoOcrAviso::query()->where('final', true)->count())->toBe(2);
+    Queue::assertNotPushed(EnviarDocumentoAoOcrJob::class);
+});
+
+it('lista regrava o vazio como PDF durante a revelação (JaRevelado): segue ao envio pelo objeto gravado, sem 2ª chamada SOAP', function () {
+    Queue::fake([EnviarDocumentoAoOcrJob::class, EnviarAvisoOcrJob::class]);
+    [$processamento, $documentos] = cenarioDownloadOcr([['mimetype' => '']]);
+    $documento = $documentos->first();
+    $this->mni = simularIntegracaoMni(respostaMniDownloadOcr(revelacaoMniDownloadOcr(
+        $documento,
+        'application/pdf',
+        fn () => ProcessoDocumento::query()->whereKey($documento->id)->update(['mimetype' => 'application/pdf']),
+    )));
+
+    baixarParaOcr($processamento, $documento);
+
+    expect($this->mni->requisicoes)->toHaveCount(1)
+        ->and($documento->fresh()->mimetype)->toBe('application/pdf')
+        ->and($documento->fresh()->status)->toBe(ProcessoDocumento::STATUS_BAIXADO)
+        ->and(ProcessoOcrAviso::count())->toBe(0);
+    Queue::assertPushedOn('ocr-envio', EnviarDocumentoAoOcrJob::class, fn (EnviarDocumentoAoOcrJob $job) => $job->documentoId === $documento->id);
+    Queue::assertPushedTimes(EnviarDocumentoAoOcrJob::class, 1);
+});

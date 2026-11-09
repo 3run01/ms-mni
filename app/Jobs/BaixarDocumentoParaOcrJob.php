@@ -5,8 +5,11 @@ namespace App\Jobs;
 use App\Models\ProcessoDocumento;
 use App\Models\ProcessoOcrProcessamento;
 use App\Services\MNI\ClassificarFalhaMniService;
+use App\Services\Ocr\FormatosOcr;
 use App\Services\Ocr\ProcessamentoOcrService;
+use App\Services\Ocr\ResultadoRevelacaoOcr;
 use App\Services\Processo\SalvarDocumentoProcessoService;
+use Closure;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -23,6 +26,13 @@ use Throwable;
  *
  * ShouldBeEncrypted: o par do PJe só fica em job cifrado (RNF-01). O envio
  * (EnviarDocumentoAoOcrJob) leva só os ids.
+ *
+ * Mimetype vazio (DEP-07 (c); RF-09 a RF-13): o documento que o tribunal não
+ * informou na lista é sempre pedido ao tribunal, mesmo `baixado` no S3, e o
+ * mimetype da resposta decide entre o envio, `ignorados` com aviso e
+ * `com_erro` (`ProcessamentoOcrService::registrarMimetypeRevelado`, sob as
+ * travas). Um mimetype conhecido fora da lista nunca vai ao envio: o job sai
+ * sem SOAP e só encerra o processamento quando nada mais resta (Q-05).
  *
  * Recusa do par (RF-10, D7): o job encerra o processamento como `falhou` e
  * retorna sem relançar. Assim, não vai a `failed_jobs`, o documento fica
@@ -97,42 +107,83 @@ class BaixarDocumentoParaOcrJob implements ShouldBeEncrypted, ShouldQueue
             return;
         }
 
-        // 3. Já `baixado` com o objeto no S3 (R2-1): direto ao envio, com 0
-        //    SOAP. Vale também para o HTML legado (NC-2), que vai pelo PDF já
-        //    gravado: o baixarDocumento() reconsultaria o MNI para gravar o
-        //    .html, e o fluxo do OCR não precisa dele.
+        // 3. Mimetype não vazio fora da lista que não foi revelado neste job,
+        //    por exemplo regravado pela lista enquanto o documento esperava
+        //    na fila (RF-13, Q-05).
+        if (FormatosOcr::ehIgnorado($documento->mimetype)) {
+            $this->sairForaDaLista($documento, $processamentos);
+
+            return;
+        }
+
+        // 4. Mimetype não informado pelo tribunal na lista (RF-09): pede o
+        //    documento ao tribunal com o par do dono, mesmo `baixado` no S3,
+        //    e decide pelo mimetype da resposta, gravado sob as travas.
+        if ($documento->mimetype === FormatosOcr::MIMETYPE_NAO_INFORMADO) {
+            $revelado = null;
+
+            $baixou = $this->baixarComOParDoDono($documento, $processamentos, function () use ($salvarDocumento, $documento, &$revelado) {
+                $revelado = $salvarDocumento->baixarRevelandoMimetype($documento, $this->login, $this->senha);
+            });
+
+            if (! $baixou) {
+                return;
+            }
+
+            $resultado = $processamentos->registrarMimetypeRevelado($documento, (string) $revelado);
+
+            if ($resultado === ResultadoRevelacaoOcr::Enviar) {
+                $this->despacharEnvio($documento);
+
+                return;
+            }
+
+            // `Ignorado` e `SemMimetype` já avisaram e, se nada resta,
+            // encerraram o processamento (RF-11, RF-12).
+            if ($resultado !== ResultadoRevelacaoOcr::JaRevelado) {
+                return;
+            }
+
+            // `JaRevelado`: outro caminho gravou o mimetype entre a resposta
+            // do tribunal e a trava. A decisão segue pelo valor gravado, sem
+            // nova chamada SOAP e sem aviso desta revelação (RNF-05).
+            $documento->refresh();
+
+            if (FormatosOcr::ehIgnorado($documento->mimetype)) {
+                $this->sairForaDaLista($documento, $processamentos);
+
+                return;
+            }
+
+            if (! FormatosOcr::ehLegivel($documento->mimetype)) {
+                // Ainda `''`: o `ocr_job_id` mudou desde a leitura, e quem o
+                // mudou cuida do documento. Nada a enviar.
+                Log::warning("[ProcessoDocumento:{$documento->id}] mimetype ainda não informado depois da revelação; envio ao OCR não despachado", [
+                    'processamento_id' => $this->processamentoId,
+                ]);
+
+                return;
+            }
+        }
+
+        // 5. Legível já `baixado` com o objeto no S3 (R2-1): direto ao envio,
+        //    com 0 SOAP. Vale também para o HTML legado (NC-2), que vai pelo
+        //    PDF já gravado: o baixarDocumento() reconsultaria o MNI para
+        //    gravar o .html, e o fluxo do OCR não precisa dele.
         if ($this->temObjetoNoS3($documento)) {
             $this->despacharEnvio($documento);
 
             return;
         }
 
-        // 4. Download com o par do dono.
-        try {
+        // 6. Legível: download com o par do dono, pelo mimetype gravado.
+        $baixou = $this->baixarComOParDoDono($documento, $processamentos, function () use ($salvarDocumento, $documento) {
             $salvarDocumento->baixarDocumento($documento, $this->login, $this->senha);
-        } catch (Throwable $e) {
-            if (ClassificarFalhaMniService::recusaNaCadeia($e)) {
-                // RF-10: encerra antes de liberar os outros downloads, que
-                // conferem a situação no item 1. Sem relançar e sem
-                // `com_erro`: o documento fica pendente para o pedido seguinte.
-                $processamentos->encerrarPorRecusa($this->processamentoId);
+        });
 
-                Log::warning("{$prefixo} o tribunal recusou o par do dono no download do documento {$documento->id}; processamento encerrado");
-
-                return;
-            }
-
-            // Só a classe: a mensagem pode trazer o texto cru do tribunal.
-            Log::warning("[ProcessoDocumento:{$documento->id}] download do OCR falhou", [
-                'processamento_id' => $this->processamentoId,
-                'erro' => class_basename($e),
-                'tentativa' => $this->attempts(),
-            ]);
-
-            throw $e;
+        if ($baixou) {
+            $this->despacharEnvio($documento);
         }
-
-        $this->despacharEnvio($documento);
     }
 
     /**
@@ -169,11 +220,69 @@ class BaixarDocumentoParaOcrJob implements ShouldBeEncrypted, ShouldQueue
         ]);
     }
 
+    /**
+     * O atalho do objeto no S3 só vale para mimetype da lista legível
+     * (RF-13): o `''` precisa da chamada ao tribunal que revela o mimetype,
+     * e o fora da lista nunca vai ao envio.
+     */
     private function temObjetoNoS3(ProcessoDocumento $documento): bool
     {
-        return $documento->status === ProcessoDocumento::STATUS_BAIXADO
+        return FormatosOcr::ehLegivel($documento->mimetype)
+            && $documento->status === ProcessoDocumento::STATUS_BAIXADO
             && filled($documento->path)
             && Storage::disk('s3')->exists($documento->path);
+    }
+
+    /**
+     * Roda o download com o par do dono (RF-09). A recusa do par encerra o
+     * processamento como `falhou` e devolve `false`, sem relançar (RF-10,
+     * D7): não vai a `failed_jobs`, o documento fica pendente (não conta em
+     * `com_erro`) e os downloads ainda na fila saem no item 1 do handle(),
+     * sem chamar o MNI com o par recusado. As demais falhas relançam para a
+     * nova tentativa; esgotadas, `failed()` marca o erro.
+     *
+     * @param  Closure(): void  $download
+     */
+    private function baixarComOParDoDono(ProcessoDocumento $documento, ProcessamentoOcrService $processamentos, Closure $download): bool
+    {
+        try {
+            $download();
+        } catch (Throwable $e) {
+            if (ClassificarFalhaMniService::recusaNaCadeia($e)) {
+                $processamentos->encerrarPorRecusa($this->processamentoId);
+
+                Log::warning("[ProcessamentoOcr:{$this->processamentoId}] o tribunal recusou o par do dono no download do documento {$documento->id}; processamento encerrado");
+
+                return false;
+            }
+
+            // Só a classe: a mensagem pode trazer o texto cru do tribunal.
+            Log::warning("[ProcessoDocumento:{$documento->id}] download do OCR falhou", [
+                'processamento_id' => $this->processamentoId,
+                'erro' => class_basename($e),
+                'tentativa' => $this->attempts(),
+            ]);
+
+            throw $e;
+        }
+
+        return true;
+    }
+
+    /**
+     * Saída Q-05 (RF-13; DP-07): mimetype conhecido fora da lista que este
+     * job não revelou. Sem SOAP, sem envio e sem aviso intermediário; o único
+     * aviso possível é o final, quando nada mais resta no processamento.
+     */
+    private function sairForaDaLista(ProcessoDocumento $documento, ProcessamentoOcrService $processamentos): void
+    {
+        $concluido = $processamentos->concluirSeNadaResta($this->processamentoId);
+
+        Log::info("[ProcessoDocumento:{$documento->id}] mimetype fora da lista no download do OCR; documento não baixado nem enviado", [
+            'mimetype' => $documento->mimetype,
+            'processamento_id' => $this->processamentoId,
+            'processamento_concluido' => $concluido,
+        ]);
     }
 
     /**
